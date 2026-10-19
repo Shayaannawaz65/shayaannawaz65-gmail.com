@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T2T TRON USDT TRC20 Console</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:720px;margin:48px auto;padding:0 18px;background:#f5f6f8;color:#17202a}
+    main{background:white;border:1px solid #dfe3e8;border-radius:12px;padding:24px}
+    h1{font-size:1.5rem}
+    .status{padding:12px;background:#f1f3f5;border-radius:8px}
+    dt{font-weight:700;margin-top:16px}
+    dd{margin:4px 0 0}
+    button{margin-top:20px;padding:10px 14px;cursor:pointer}
+    small{color:#555}
+  </style>
+</head>
+<body>
+<main>
+  <h1>T2T TRON USDT TRC20 Console</h1>
+  <p>Blockchain: <strong>TRON mainnet</strong> · Asset: <strong>USDT TRC20</strong></p>
+  <div class="status" id="status" role="status">Checking service status…</div>
+  <dl>
+    <dt>Blockchain sync</dt><dd>Not initiated by this console</dd>
+    <dt>Transfer verification</dt><dd>Requires validated, confirmed TRON on-chain data</dd>
+  </dl>
+  <p><small>This page reports console health only. It does not initiate blockchain sync or independently verify transfers. Confirmation requires validated TRON on-chain data.</small></p>
+  <button type="button" id="refresh">Refresh status</button>
+</main>
+<script>
+async function refreshStatus(){
+  const box=document.getElementById('status');
+  box.textContent='Checking service status…';
+  try{
+    const response=await fetch('/health',{cache:'no-store'});
+    if(!response.ok) throw new Error('Service returned HTTP '+response.status);
+    const data=await response.json();
+    box.textContent='Console: '+data.status+' | Network: '+data.network+' | Asset: '+data.asset+' | Blockchain sync initiated: '+(data.blockchainSyncPerformed?'Yes':'No');
+  }catch(_error){
+    box.textContent='Console status unavailable. This page does not initiate blockchain transfers.';
+  }
+}
+document.getElementById('refresh').addEventListener('click',refreshStatus);
+refreshStatus();
+</script>
+</body>
+</html>

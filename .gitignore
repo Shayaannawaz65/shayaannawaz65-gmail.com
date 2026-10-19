@@ -1,0 +1,12 @@
+.vercel/
+.env*
+node_modules/
+*.bak
+*.backup
+*.log
+coverage/
+.crypto-venv/
+.venv/
+
+# Historical backups are not part of the deployable source
+backups/
