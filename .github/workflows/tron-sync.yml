@@ -60,6 +60,20 @@ jobs:
             );
 
             core.info(`TRON sync endpoint HTTP status: ${response.status}`);
+            const responseText = await response.text();
+            try {
+              const result = JSON.parse(responseText);
+              const safeResult = Object.fromEntries(
+                ["scan_complete", "retry_required", "completed_windows",
+                 "pages_read", "events_seen", "new_events",
+                 "invalid_events_skipped", "cursor", "message", "error"]
+                  .filter((key) => key in result)
+                  .map((key) => [key, result[key]])
+              );
+              core.info(`TRON sync result: ${JSON.stringify(safeResult)}`);
+            } catch {
+              core.info("TRON sync response was not JSON; body omitted.");
+            }
             if (!response.ok) {
               core.setFailed(`TRON sync request failed with HTTP ${response.status}.`);
             }
