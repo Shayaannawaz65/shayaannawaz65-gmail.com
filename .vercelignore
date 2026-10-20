@@ -1,0 +1,15 @@
+backups/
+tests/
+.github/
+*.bak
+*.before-route
+migrations/
+
+*.before-jwt-*
+.env*
+.vercel/
+.crypto-venv/
+.venv/
+node_modules/
+
+*.before-db-priority-*

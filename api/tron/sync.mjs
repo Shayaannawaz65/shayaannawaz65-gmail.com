@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import pg from "pg";
+import { createTronGridJwt } from "./jwt.mjs";
 
 const { Pool } = pg;
 const USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
@@ -81,17 +82,22 @@ function getPool() {
   if (!pool) {
     // Prefer the pooled connection for serverless execution.
     const connectionString =
-      process.env.DATABASE_URL ||
-      process.env.POSTGRES_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
-      process.env.POSTGRES_URL_NON_POOLING;
+      process.env.POSTGRES_URL_NON_POOLING ||
+      process.env.DATABASE_URL ||
+      process.env.POSTGRES_URL;
 
     if (!connectionString || connectionString.includes("[SENSITIVE]")) {
       throw new Error("Database configuration missing");
     }
 
+    const parsedConnectionString = new URL(connectionString);
+    if (parsedConnectionString.searchParams.get("sslmode") === "require") {
+      parsedConnectionString.searchParams.set("sslmode", "verify-full");
+    }
+
     pool = new Pool({
-      connectionString,
+      connectionString: parsedConnectionString.toString(),
       ssl: { rejectUnauthorized: true },
       max: 2,
       connectionTimeoutMillis: 10000,
@@ -103,7 +109,8 @@ function getPool() {
 
 export function createHandler({
   poolProvider = getPool,
-  fetchImpl = (...args) => fetch(...args)
+  fetchImpl = (...args) => fetch(...args),
+  jwtFactory = createTronGridJwt
 } = {}) {
   return async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -116,8 +123,11 @@ export function createHandler({
   const token = process.env.T2T_TRON_SYNC_TOKEN;
   const receiver = process.env.T2T_TRON_RECEIVER_ADDRESS;
   const apiKey = process.env.TRONGRID_API_KEY;
+  const jwtPrivateKey = process.env.TRONGRID_JWT_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const jwtKeyId = process.env.TRONGRID_JWT_KEY_ID;
+  const hasJwtConfiguration = Boolean(jwtPrivateKey && jwtKeyId);
 
-  if (!token || !ADDRESS_RE.test(receiver || "") || normalizeTronAddress(receiver) !== receiver || !apiKey) {
+  if (!token || !ADDRESS_RE.test(receiver || "") || normalizeTronAddress(receiver) !== receiver || !apiKey || (!hasJwtConfiguration && jwtFactory === createTronGridJwt)) {
     return res.status(503).json({ error: "Server configuration incomplete" });
   }
   if (!authorized(req, token)) {
@@ -216,7 +226,8 @@ export function createHandler({
       const response = await fetchImpl(url, {
         headers: {
           Accept: "application/json",
-          "TRON-PRO-API-KEY": apiKey
+          "TRON-PRO-API-KEY": apiKey,
+          Authorization: `Bearer ${jwtFactory({ privateKey: jwtPrivateKey, keyId: jwtKeyId })}`
         },
         signal: AbortSignal.timeout(12000)
       });
@@ -224,6 +235,15 @@ export function createHandler({
       if (!response.ok) {
         const error = new Error("Blockchain provider unavailable");
         error.providerFailure = true;
+        error.providerStatus = response.status;
+        error.providerCategory =
+          response.status === 401 || response.status === 403
+            ? "AUTH_ERROR"
+            : response.status === 429
+              ? "RATE_LIMIT"
+              : response.status >= 500
+                ? "PROVIDER_SERVER_ERROR"
+                : "PROVIDER_HTTP_ERROR";
         throw error;
       }
 
@@ -561,9 +581,20 @@ export function createHandler({
       });
     }
 
+    const safeCategory = error?.providerFailure
+      ? (error.providerCategory || "PROVIDER_HTTP_ERROR")
+      : error?.name === "AbortError" || error?.name === "TimeoutError"
+        ? "PROVIDER_TIMEOUT"
+        : ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN"].includes(error?.code)
+          ? "PROVIDER_NETWORK_ERROR"
+          : "INTERNAL_ERROR";
+
     console.error(
       "TRON sync failed:",
-      error?.providerFailure ? "ProviderFailure" : error?.code || error?.name || "Error"
+      safeCategory,
+      Number.isInteger(error?.providerStatus)
+        ? `http_status=${error.providerStatus}`
+        : ""
     );
     return res.status(502).json({ error: "Sync failed; check server logs" });
   } finally {

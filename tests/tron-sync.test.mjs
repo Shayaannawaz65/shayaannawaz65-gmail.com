@@ -129,12 +129,16 @@ test("rejects an invalid Bearer token before connecting to the database", async 
   const saved = {
     token: process.env.T2T_TRON_SYNC_TOKEN,
     receiver: process.env.T2T_TRON_RECEIVER_ADDRESS,
-    apiKey: process.env.TRONGRID_API_KEY
+    apiKey: process.env.TRONGRID_API_KEY,
+    jwtPrivateKey: process.env.TRONGRID_JWT_PRIVATE_KEY,
+    jwtKeyId: process.env.TRONGRID_JWT_KEY_ID
   };
 
   process.env.T2T_TRON_SYNC_TOKEN = "test-only-secret";
   process.env.T2T_TRON_RECEIVER_ADDRESS = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
   process.env.TRONGRID_API_KEY = "test-only-api-key";
+  process.env.TRONGRID_JWT_PRIVATE_KEY = "test-only-private-key";
+  process.env.TRONGRID_JWT_KEY_ID = "test-only-key-id";
 
   let statusCode;
   let responseBody;
@@ -163,7 +167,9 @@ test("rejects an invalid Bearer token before connecting to the database", async 
     for (const [key, value] of Object.entries({
       T2T_TRON_SYNC_TOKEN: saved.token,
       T2T_TRON_RECEIVER_ADDRESS: saved.receiver,
-      TRONGRID_API_KEY: saved.apiKey
+      TRONGRID_API_KEY: saved.apiKey,
+      TRONGRID_JWT_PRIVATE_KEY: saved.jwtPrivateKey,
+      TRONGRID_JWT_KEY_ID: saved.jwtKeyId
     })) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -200,6 +206,7 @@ test("returns 409 and skips provider fetch when another request owns the lease",
   };
 
   const testHandler = createHandler({
+    jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
     fetchImpl: async () => {
       fetchCalls++;
@@ -289,6 +296,7 @@ test("returns 409 without provider or deposit writes when lease renewal is lost"
   };
 
   const testHandler = createHandler({
+    jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
     fetchImpl: async () => {
       fetchCalls++;
@@ -384,6 +392,7 @@ test("keeps cursor unchanged and releases lease when provider fails", async () =
   };
 
   const testHandler = createHandler({
+    jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
     fetchImpl: async () => {
       fetchCalls++;
@@ -514,6 +523,7 @@ test("commits completed empty scan windows and releases lease", async () => {
   };
 
   const testHandler = createHandler({
+    jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
     fetchImpl: async () => {
       fetchCalls++;
@@ -651,6 +661,7 @@ test("inserts a validated confirmed transfer and commits cursor without auto app
   };
 
   const testHandler = createHandler({
+    jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
     fetchImpl: async input => {
       fetchCalls++;
@@ -824,6 +835,7 @@ test("incomplete pagination returns 503 without advancing cursor or writing depo
   };
 
   const testHandler = createHandler({
+    jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
     fetchImpl: async () => {
       fetchCalls++;
@@ -959,6 +971,7 @@ test("duplicate confirmed transfer is not reinserted and updates last_seen_at", 
   };
 
   const testHandler = createHandler({
+    jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
     fetchImpl: async input => {
       const url = new URL(String(input));
