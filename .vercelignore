@@ -13,3 +13,5 @@ migrations/
 node_modules/
 
 *.before-db-priority-*
+
+.t2t-sync-token

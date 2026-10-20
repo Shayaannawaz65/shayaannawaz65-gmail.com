@@ -11,3 +11,5 @@ coverage/
 # Historical backups are not part of the deployable source
 backups/
 .vercel
+
+.t2t-sync-token
