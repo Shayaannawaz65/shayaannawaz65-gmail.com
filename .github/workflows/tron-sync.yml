@@ -19,6 +19,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           T2T_TRON_SYNC_TOKEN: ${{ secrets.T2T_TRON_SYNC_TOKEN }}
+          T2T_TRON_SYNC_URL: ${{ vars.T2T_TRON_SYNC_URL }}
         with:
           script: |
             const syncToken = process.env.T2T_TRON_SYNC_TOKEN;
@@ -27,9 +28,26 @@ jobs:
               return;
             }
 
+            const syncUrl = process.env.T2T_TRON_SYNC_URL;
+            if (!syncUrl) {
+              core.setFailed("Required T2T_TRON_SYNC_URL repository variable is not configured.");
+              return;
+            }
+            let parsedUrl;
+            try {
+              parsedUrl = new URL(syncUrl);
+            } catch {
+              core.setFailed("T2T_TRON_SYNC_URL must be a valid HTTPS URL.");
+              return;
+            }
+            if (parsedUrl.protocol !== "https:" || parsedUrl.pathname !== "/api/tron/sync") {
+              core.setFailed("T2T_TRON_SYNC_URL must be HTTPS and end with /api/tron/sync.");
+              return;
+            }
+
             const oidcToken = await core.getIDToken();
             const response = await fetch(
-              "https://t2t-nowpayments.vercel.app/api/tron/sync",
+              parsedUrl.toString(),
               {
                 method: "POST",
                 headers: {
