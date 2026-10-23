@@ -66,7 +66,7 @@ jobs:
               const safeResult = Object.fromEntries(
                 ["scan_complete", "retry_required", "completed_windows",
                  "pages_read", "events_seen", "new_events",
-                 "invalid_events_skipped", "cursor", "message", "error"]
+                 "invalid_events_skipped", "cursor_timestamp", "cursor", "message", "error"]
                   .filter((key) => key in result)
                   .map((key) => [key, result[key]])
               );
