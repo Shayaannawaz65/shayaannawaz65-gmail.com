@@ -77,3 +77,20 @@ jobs:
             if (!response.ok) {
               core.setFailed(`TRON sync request failed with HTTP ${response.status}.`);
             }
+
+            const healthUrl = new URL("/api/tron/db-health", parsedUrl.origin);
+            const healthResponse = await fetch(healthUrl, {
+              method: "GET",
+              headers: {
+                "x-vercel-trusted-oidc-idp-token": oidcToken,
+                "Authorization": `Bearer ${syncToken}`
+              }
+            });
+            core.info(`TRON db-health HTTP status: ${healthResponse.status}`);
+            if (healthResponse.status === 401) {
+              core.warning("db-health rejected the configured GitHub sync secret.");
+            } else if (!healthResponse.ok) {
+              core.warning(`db-health returned HTTP ${healthResponse.status}; response body omitted.`);
+            } else {
+              core.info("db-health authorization passed; response body omitted.");
+            }
