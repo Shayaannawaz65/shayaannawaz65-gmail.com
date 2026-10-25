@@ -3,6 +3,7 @@ import express from 'express';
 import tronSyncHandler from './api/tron/sync.mjs';
 import heartbeatHandler from './api/console/heartbeat.mjs';
 import consoleStatusHandler from "./api/console/status.mjs";
+import transactionsHandler from './api/console/transactions.mjs';
 
 const app = express();
 app.disable('x-powered-by');
@@ -16,6 +17,7 @@ app.use(express.static(publicDir));
 app.post('/api/tron/sync', tronSyncHandler);
 app.post('/api/console/heartbeat', heartbeatHandler);
 app.get('/api/console/status', consoleStatusHandler);
+app.get('/api/console/transactions', transactionsHandler);
 
 app.get('/health', (_req, res) => {
   res.json({

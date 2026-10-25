@@ -157,8 +157,16 @@ export default async function handler(req, res) {
       detail: "Merchant and branch mapping has not been configured"
     },
     transactionFeed: {
-      status: "not_configured",
-      detail: "No authenticated central transaction-feed endpoint is implemented"
+      status: typeof process.env.T2T_CONSOLE_FEED_TOKEN === "string" &&
+        process.env.T2T_CONSOLE_FEED_TOKEN.trim().length >= 32 &&
+        !process.env.T2T_CONSOLE_FEED_TOKEN.includes("[SENSITIVE]")
+          ? "configured"
+          : "not_configured",
+      detail: typeof process.env.T2T_CONSOLE_FEED_TOKEN === "string" &&
+        process.env.T2T_CONSOLE_FEED_TOKEN.trim().length >= 32 &&
+        !process.env.T2T_CONSOLE_FEED_TOKEN.includes("[SENSITIVE]")
+          ? "Read-only observed-transfer feed is configured; no approvals or settlements are performed"
+          : "A dedicated feed credential is not configured"
     },
     blockchainSync: {
       status: "monitor_only",

@@ -13,3 +13,5 @@ backups/
 .vercel
 
 .t2t-sync-token
+
+.t2t-feed-token
