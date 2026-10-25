@@ -1,11 +1,16 @@
 import express from 'express';
 import tronSyncHandler from './api/tron/sync.mjs';
+import heartbeatHandler from './api/console/heartbeat.mjs';
+import consoleStatusHandler from "./api/console/status.mjs";
 
 const app = express();
 app.disable('x-powered-by');
+app.use(express.json({ limit: '16kb', strict: true }));
 app.use(express.static('public'));
 
 app.post('/api/tron/sync', tronSyncHandler);
+app.post('/api/console/heartbeat', heartbeatHandler);
+app.get('/api/console/status', consoleStatusHandler);
 
 app.get('/health', (_req, res) => {
   res.json({
