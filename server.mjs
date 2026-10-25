@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import tronSyncHandler from './api/tron/sync.mjs';
 import heartbeatHandler from './api/console/heartbeat.mjs';
@@ -6,7 +7,11 @@ import consoleStatusHandler from "./api/console/status.mjs";
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '16kb', strict: true }));
-app.use(express.static('public'));
+const publicDir = fileURLToPath(new URL('./public/', import.meta.url));
+app.get('/', (_req, res) => {
+  res.sendFile(fileURLToPath(new URL('./public/index.html', import.meta.url)));
+});
+app.use(express.static(publicDir));
 
 app.post('/api/tron/sync', tronSyncHandler);
 app.post('/api/console/heartbeat', heartbeatHandler);
