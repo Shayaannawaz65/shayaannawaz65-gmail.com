@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyPaymentMatch } from "../api/tron/payment-matching.mjs";
+import { classifyPaymentMatch } from "../lib/tron/payment-matching.mjs";
 
 const contract = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const receiver = "TExAW9464LvbWmAsbcmNhvHQwawUn8rmN2";

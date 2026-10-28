@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import pg from "pg";
-import { createTronGridJwt } from "./jwt.mjs";
+import { createTronGridJwt } from "../../lib/tron/jwt.mjs";
 import { normalizeTronAddress } from "./address.mjs";
-import { classifyPaymentMatch } from "./payment-matching.mjs";
+import { classifyPaymentMatch } from "../../lib/tron/payment-matching.mjs";
 
 const { Pool } = pg;
 const USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
