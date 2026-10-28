@@ -4,6 +4,8 @@ import tronSyncHandler from './api/tron/sync.mjs';
 import heartbeatHandler from './api/console/heartbeat.mjs';
 import consoleStatusHandler from "./api/console/status.mjs";
 import transactionsHandler from './api/console/transactions.mjs';
+import paymentOrdersHandler from './api/console/payment-orders.mjs';
+import paymentStatusHandler from './api/console/payment-status.mjs';
 
 const app = express();
 app.disable('x-powered-by');
@@ -16,6 +18,8 @@ app.use(express.static(publicDir));
 
 app.post('/api/tron/sync', tronSyncHandler);
 app.post('/api/console/heartbeat', heartbeatHandler);
+app.post('/api/console/payment-orders', paymentOrdersHandler);
+app.all('/api/console/payment-status', paymentStatusHandler);
 app.get('/api/console/status', consoleStatusHandler);
 app.get('/api/console/transactions', transactionsHandler);
 

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>USDT TRC20 Payment</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0b1220;color:#eef2ff}
+*{box-sizing:border-box}body{margin:0;padding:24px;min-height:100vh;display:grid;place-items:center}
+main{width:min(100%,520px);padding:28px;border:1px solid #29364d;border-radius:20px;background:#121d30}
+h1{font-size:1.55rem;margin:0 0 8px}p{color:#b7c3d8;line-height:1.5}
+.label{font-size:.85rem;color:#a9b8d0;margin-top:22px}
+.value{overflow-wrap:anywhere;font-weight:650;font-size:1.05rem;margin-top:6px}
+.amount{font-size:2rem;font-weight:750;margin-top:8px;overflow-wrap:anywhere}
+button{margin-top:10px;padding:10px 14px;border:1px solid #536681;border-radius:9px;background:#243550;color:white;cursor:pointer}
+#status{display:inline-block;padding:7px 12px;border-radius:999px;background:#26354b;font-weight:700}
+.note{font-size:.85rem;color:#a9b8d0}#message{min-height:1.5em;color:#f6c779}
+</style>
+</head>
+<body>
+<main>
+<h1>Pay with USDT</h1>
+<p>TRON network (TRC20) only. Send the exact amount to the address below.</p>
+<div class="label">Payment status</div><p><span id="status">Loading…</span></p>
+<div class="label">USDT amount</div><div class="amount" id="amount">—</div>
+<button id="copyAmount" type="button">Copy amount</button>
+<div class="label">Receiving address</div><div class="value" id="address">—</div>
+<button id="copyAddress" type="button">Copy address</button>
+<div class="label">Invoice reference</div><div class="value" id="invoice">—</div>
+<div class="label">Expires at</div><div class="value" id="expiry">—</div>
+<p id="message" role="status"></p>
+<p class="note">Do not send another token or use another network. This page never confirms payments itself; status changes only after the server verifies a confirmed on-chain transfer.</p>
+</main>
+<script>
+(() => {
+  const token = new URLSearchParams(location.search).get("token") || "";
+  const el = id => document.getElementById(id);
+  let amount = "";
+  let address = "";
+  let stopped = false;
+
+  async function copy(value) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      el("message").textContent = "Copied.";
+    } catch {
+      el("message").textContent = "Copy unavailable. Select and copy the value manually.";
+    }
+  }
+  el("copyAmount").addEventListener("click", () => copy(amount));
+  el("copyAddress").addEventListener("click", () => copy(address));
+
+  function formatRaw(raw) {
+    if (!/^\d{1,78}$/.test(String(raw))) return "Unavailable";
+    const digits = String(raw).padStart(7, "0");
+    const whole = digits.slice(0, -6).replace(/^0+(?=\d)/, "");
+    const fraction = digits.slice(-6).replace(/0+$/, "");
+    return whole + (fraction ? "." + fraction : "");
+  }
+
+  async function refresh() {
+    if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
+      el("status").textContent = "Invalid payment link";
+      stopped = true;
+      return;
+    }
+    try {
+      const response = await fetch(
+        "/api/console/payment-status?token=" + encodeURIComponent(token),
+        { method: "GET", cache: "no-store", headers: { "Accept": "application/json" } }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Status unavailable");
+
+      amount = formatRaw(data.amountUsdtRaw);
+      address = data.receiverAddress;
+      el("amount").textContent = amount + " USDT";
+      el("address").textContent = address;
+      el("invoice").textContent = data.invoiceReference;
+      el("expiry").textContent = new Date(data.expiresAt).toLocaleString();
+      el("status").textContent = data.status;
+      el("message").textContent = data.status === "CONFIRMED"
+        ? "Payment confirmed on-chain."
+        : data.status === "EXPIRED"
+        ? "This payment request has expired."
+        : data.status === "PENDING"
+        ? "Waiting for a confirmed on-chain transfer."
+        : "Order status: " + data.status;
+
+      if (data.status !== "PENDING") stopped = true;
+    } catch (error) {
+      el("message").textContent = error.message || "Could not retrieve payment status.";
+    }
+  }
+
+  refresh();
+  const poll = setInterval(() => {
+    if (stopped) clearInterval(poll);
+    else refresh();
+  }, 10000);
+})();
+</script>
+</body>
+</html>

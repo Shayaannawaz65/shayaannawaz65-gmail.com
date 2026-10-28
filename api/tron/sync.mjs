@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import pg from "pg";
 import { createTronGridJwt } from "./jwt.mjs";
 import { normalizeTronAddress } from "./address.mjs";
+import { classifyPaymentMatch } from "./payment-matching.mjs";
 
 const { Pool } = pg;
 const USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
@@ -510,6 +511,71 @@ export function createHandler({
                WHERE transaction_id = $1 AND event_index = $2`,
               [item.txid, item.eventIndex]
             );
+          }
+
+          const blockTimestamp = new Date(item.timestamp).toISOString();
+
+          const candidateResult = await client.query(
+            `SELECT
+               order_id AS "orderId",
+               status,
+               token_contract AS "tokenContract",
+               receiver_address AS "receiverAddress",
+               amount_usdt_raw::text AS "amountUsdtRaw",
+               created_at AS "createdAt",
+               expires_at AS "expiresAt"
+             FROM public.t2t_payment_orders
+             WHERE status = 'PENDING'
+               AND token_contract = $1
+               AND receiver_address = $2
+               AND amount_usdt_raw = $3::numeric
+               AND created_at <= $4::timestamptz
+               AND expires_at > $4::timestamptz
+             ORDER BY order_id
+             FOR UPDATE`,
+            [USDT_CONTRACT, item.recipient, String(item.raw), blockTimestamp]
+          );
+
+          const match = classifyPaymentMatch({
+            deposit: {
+              observationStatus: "OBSERVED_CONFIRMED",
+              tokenContract: USDT_CONTRACT,
+              receiverAddress: item.recipient,
+              amountRaw: String(item.raw),
+              transactionId: item.txid,
+              eventIndex: item.eventIndex,
+              blockTimestamp
+            },
+            orders: candidateResult.rows
+          });
+
+          if (match.status === "unique_match") {
+            const confirmationResult = await client.query(
+              `UPDATE public.t2t_payment_orders
+               SET status = 'CONFIRMED',
+                   matched_transaction_id = $2,
+                   matched_event_index = $3,
+                   confirmed_at = NOW(),
+                   updated_at = NOW()
+               WHERE order_id = $1
+                 AND status = 'PENDING'
+                 AND created_at <= $4::timestamptz
+                 AND expires_at > $4::timestamptz
+                 AND NOT EXISTS (
+                   SELECT 1
+                   FROM public.t2t_payment_orders existing
+                   WHERE existing.matched_transaction_id = $2
+                     AND existing.matched_event_index = $3
+                 )`,
+              [match.orderId, item.txid, item.eventIndex, blockTimestamp]
+            );
+
+            if (confirmationResult.rowCount !== 1) {
+              console.warn(
+                "Payment order match was not applied; leaving order unconfirmed",
+                { orderId: match.orderId, transactionId: item.txid, eventIndex: item.eventIndex }
+              );
+            }
           }
         }
 

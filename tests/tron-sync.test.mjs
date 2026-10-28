@@ -583,7 +583,7 @@ test("commits completed empty scan windows and releases lease", async () => {
 });
 
 
-test("inserts a validated confirmed transfer and commits cursor without auto approval", async () => {
+test("confirms a uniquely matched payment order when the database updates one row", async () => {
   const saved = {
     token: process.env.T2T_TRON_SYNC_TOKEN,
     receiver: process.env.T2T_TRON_RECEIVER_ADDRESS,
@@ -643,6 +643,32 @@ test("inserts a validated confirmed transfer and commits cursor without auto app
       if (q.startsWith("INSERT INTO public.tron_usdt_deposits")) {
         depositInserts.push({ sql: q, params });
         return { rowCount: 1, rows: [{ transaction_id: txid }] };
+      }
+
+      if (q.includes("FROM public.t2t_payment_orders") &&
+          q.includes("FOR UPDATE")) {
+        const blockTime = new Date(params[3]).getTime();
+        return {
+          rowCount: 1,
+          rows: [{
+            orderId: "test-order-001",
+            status: "PENDING",
+            tokenContract: contract,
+            receiverAddress: receiver,
+            amountUsdtRaw: rawAmount,
+            createdAt: new Date(blockTime - 1000).toISOString(),
+            expiresAt: new Date(blockTime + 3600000).toISOString()
+          }]
+        };
+      }
+
+      if (q.includes("UPDATE public.t2t_payment_orders") &&
+          q.includes("status = 'CONFIRMED'")) {
+        queries.push("MATCHED_ORDER_UPDATE");
+        assert.equal(params[0], "test-order-001");
+        assert.equal(params[1], txid);
+        assert.equal(params[2], 0);
+        return { rowCount: 1, rows: [] };
       }
 
       if (q.startsWith("INSERT INTO public.tron_usdt_sync_state") &&
@@ -747,6 +773,435 @@ test("inserts a validated confirmed transfer and commits cursor without auto app
     assert.equal(statusCode, 200);
     assert.ok(fetchCalls > 0);
     assert.equal(depositInserts.length, 1);
+    assert.ok(
+      queries.some(sql => /FROM public\.t2t_payment_orders/i.test(sql)),
+      "sync must query eligible payment orders inside the transaction"
+    );
+    assert.ok(
+      queries.includes("MATCHED_ORDER_UPDATE"),
+      "sync must attempt the unique payment-order confirmation"
+    );
+    assert.ok(commits > 0);
+    assert.equal(rollbacks, 0);
+    assert.equal(releaseQueries, 1);
+    assert.equal(responseBody.new_events, 1);
+    assert.equal(responseBody.auto_approval, false);
+    assert.ok(cursor);
+    assert.ok(
+      depositInserts[0].params.some(value => value === rawAmount),
+      "raw USDT amount must be stored exactly"
+    );
+    assert.equal(
+      queries.some(sql => /^UPDATE\\s+public\\.tron_usdt_sync_state\\b/i.test(sql.trim())),
+      false,
+      "cursor must not use a standalone UPDATE statement"
+    );
+  } finally {
+    for (const [key, value] of Object.entries({
+      T2T_TRON_SYNC_TOKEN: saved.token,
+      T2T_TRON_RECEIVER_ADDRESS: saved.receiver,
+      TRONGRID_API_KEY: saved.apiKey
+    })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("rolls back deposit and cursor transaction when payment-order lookup fails", async () => {
+  const saved = {
+    token: process.env.T2T_TRON_SYNC_TOKEN,
+    receiver: process.env.T2T_TRON_RECEIVER_ADDRESS,
+    apiKey: process.env.TRONGRID_API_KEY
+  };
+
+  process.env.T2T_TRON_SYNC_TOKEN = "test-only-secret";
+  process.env.T2T_TRON_RECEIVER_ADDRESS = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+  process.env.TRONGRID_API_KEY = "test-only-api-key";
+
+  let statusCode;
+  let responseBody;
+  let fetchCalls = 0;
+  let commits = 0;
+  let rollbacks = 0;
+  let releaseQueries = 0;
+  let cursor = null;
+  let cursorAdvances = 0;
+  const depositInserts = [];
+  const queries = [];
+  let transferTimestamp = null;
+
+  const txid = "a".repeat(64);
+  const receiver = process.env.T2T_TRON_RECEIVER_ADDRESS;
+  const contract = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+  const sender = "41" + "22".repeat(20);
+  const senderAddress = normalizeTronAddress(sender);
+  const rawAmount = "1250000";
+
+  const client = {
+    async query(sql, params = []) {
+      queries.push(sql);
+      const q = sql.trim();
+
+      if (q.startsWith("INSERT INTO public.tron_usdt_sync_state") &&
+          q.includes("ON CONFLICT (receiver_address) DO NOTHING")) {
+        cursor ??= params[1];
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.includes("SET lease_token = $2::uuid")) {
+        return { rowCount: 1, rows: [{ receiver_address: receiver }] };
+      }
+
+      if (q.includes("SET lease_token = NULL")) {
+        releaseQueries++;
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.includes("SET lease_until = NOW()")) {
+        return { rowCount: 1, rows: [{ receiver_address: receiver }] };
+      }
+
+      if (q.startsWith("SELECT last_completed_timestamp")) {
+        return { rowCount: 1, rows: [{ last_completed_timestamp: cursor }] };
+      }
+
+      if (q.startsWith("INSERT INTO public.tron_usdt_deposits")) {
+        depositInserts.push({ sql: q, params });
+        return { rowCount: 1, rows: [{ transaction_id: txid }] };
+      }
+
+      if (q.includes("FROM public.t2t_payment_orders") &&
+          q.includes("FOR UPDATE")) {
+        throw new Error("simulated payment-order database failure");
+      }
+
+      if (q.includes("UPDATE public.t2t_payment_orders") &&
+          q.includes("status = 'CONFIRMED'")) {
+        queries.push("MATCHED_ORDER_UPDATE");
+        assert.equal(params[0], "test-order-001");
+        assert.equal(params[1], txid);
+        assert.equal(params[2], 0);
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.startsWith("INSERT INTO public.tron_usdt_sync_state") &&
+          q.includes("last_completed_timestamp, updated_at")) {
+        cursorAdvances++;
+        cursor = params[1];
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q === "BEGIN") return { rowCount: null, rows: [] };
+      if (q === "COMMIT") {
+        commits++;
+        return { rowCount: null, rows: [] };
+      }
+      if (q === "ROLLBACK") {
+        rollbacks++;
+        return { rowCount: null, rows: [] };
+      }
+
+      return { rowCount: 1, rows: [] };
+    },
+    release() {}
+  };
+
+  const testHandler = createHandler({
+    receiverResolver: async () => process.env.T2T_TRON_RECEIVER_ADDRESS,
+    jwtFactory: () => "test-only-jwt",
+    poolProvider: () => ({ connect: async () => client }),
+    fetchImpl: async input => {
+      fetchCalls++;
+      const url = new URL(String(input));
+
+      if (url.pathname.includes("/transactions/") &&
+          url.pathname.endsWith("/events")) {
+        const timestamp = transferTimestamp;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [{
+              transaction_id: txid,
+              event_index: 0,
+              block_timestamp: timestamp,
+              contract_address: contract,
+              event_name: "Transfer",
+              result: {
+                from: senderAddress,
+                to: receiver,
+                value: rawAmount
+              },
+              success: true
+            }],
+            meta: {}
+          })
+        };
+      }
+
+      if (url.pathname.includes("/accounts/") &&
+          url.pathname.endsWith("/transactions/trc20")) {
+        const timestamp = Number(url.searchParams.get("min_timestamp")) + 1000;
+        transferTimestamp = timestamp;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [{
+              transaction_id: txid,
+              from: senderAddress,
+              to: receiver,
+              token_info: { address: contract },
+              value: rawAmount,
+              block_timestamp: timestamp
+            }],
+            meta: {}
+          })
+        };
+      }
+
+      throw new Error("Unexpected test provider URL: " + url.pathname);
+    }
+  });
+
+  const res = {
+    setHeader() {},
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(body) {
+      responseBody = body;
+      return this;
+    }
+  };
+
+  try {
+    assert.ok(senderAddress, "test sender must be a valid normalized TRON address");
+
+    await testHandler({
+      method: "POST",
+      headers: { authorization: "Bearer test-only-secret" }
+    }, res);
+
+    assert.equal(statusCode, 502);
+    assert.equal(responseBody.error, "Sync failed; check server logs");
+    assert.equal(depositInserts.length, 1, "deposit insert must be attempted before the simulated failure");
+    assert.equal(commits, 0, "failed matching transaction must not commit");
+    assert.equal(rollbacks, 1, "failed matching transaction must roll back");
+    assert.equal(cursorAdvances, 0, "failed matching transaction must not advance the cursor");
+    assert.equal(releaseQueries, 1, "sync lease must be released");
+  } finally {
+    for (const [key, value] of Object.entries({
+      T2T_TRON_SYNC_TOKEN: saved.token,
+      T2T_TRON_RECEIVER_ADDRESS: saved.receiver,
+      TRONGRID_API_KEY: saved.apiKey
+    })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("leaves a payment order unconfirmed when its conditional update affects zero rows", async () => {
+  const saved = {
+    token: process.env.T2T_TRON_SYNC_TOKEN,
+    receiver: process.env.T2T_TRON_RECEIVER_ADDRESS,
+    apiKey: process.env.TRONGRID_API_KEY
+  };
+
+  process.env.T2T_TRON_SYNC_TOKEN = "test-only-secret";
+  process.env.T2T_TRON_RECEIVER_ADDRESS = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+  process.env.TRONGRID_API_KEY = "test-only-api-key";
+
+  let statusCode;
+  let responseBody;
+  let fetchCalls = 0;
+  let commits = 0;
+  let rollbacks = 0;
+  let releaseQueries = 0;
+  let cursor = null;
+  const depositInserts = [];
+  const queries = [];
+  let transferTimestamp = null;
+
+  const txid = "a".repeat(64);
+  const receiver = process.env.T2T_TRON_RECEIVER_ADDRESS;
+  const contract = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+  const sender = "41" + "22".repeat(20);
+  const senderAddress = normalizeTronAddress(sender);
+  const rawAmount = "1250000";
+
+  const client = {
+    async query(sql, params = []) {
+      queries.push(sql);
+      const q = sql.trim();
+
+      if (q.startsWith("INSERT INTO public.tron_usdt_sync_state") &&
+          q.includes("ON CONFLICT (receiver_address) DO NOTHING")) {
+        cursor ??= params[1];
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.includes("SET lease_token = $2::uuid")) {
+        return { rowCount: 1, rows: [{ receiver_address: receiver }] };
+      }
+
+      if (q.includes("SET lease_token = NULL")) {
+        releaseQueries++;
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q.includes("SET lease_until = NOW()")) {
+        return { rowCount: 1, rows: [{ receiver_address: receiver }] };
+      }
+
+      if (q.startsWith("SELECT last_completed_timestamp")) {
+        return { rowCount: 1, rows: [{ last_completed_timestamp: cursor }] };
+      }
+
+      if (q.startsWith("INSERT INTO public.tron_usdt_deposits")) {
+        depositInserts.push({ sql: q, params });
+        return { rowCount: 1, rows: [{ transaction_id: txid }] };
+      }
+
+      if (q.includes("FROM public.t2t_payment_orders") &&
+          q.includes("FOR UPDATE")) {
+        const blockTime = new Date(params[3]).getTime();
+        return {
+          rowCount: 1,
+          rows: [{
+            orderId: "test-order-001",
+            status: "PENDING",
+            tokenContract: contract,
+            receiverAddress: receiver,
+            amountUsdtRaw: rawAmount,
+            createdAt: new Date(blockTime - 1000).toISOString(),
+            expiresAt: new Date(blockTime + 3600000).toISOString()
+          }]
+        };
+      }
+
+      if (q.includes("UPDATE public.t2t_payment_orders") &&
+          q.includes("status = 'CONFIRMED'")) {
+        queries.push("MATCHED_ORDER_UPDATE");
+        assert.equal(params[0], "test-order-001");
+        assert.equal(params[1], txid);
+        assert.equal(params[2], 0);
+        return { rowCount: 0, rows: [] };
+      }
+
+      if (q.startsWith("INSERT INTO public.tron_usdt_sync_state") &&
+          q.includes("last_completed_timestamp, updated_at")) {
+        cursor = params[1];
+        return { rowCount: 1, rows: [] };
+      }
+
+      if (q === "BEGIN") return { rowCount: null, rows: [] };
+      if (q === "COMMIT") {
+        commits++;
+        return { rowCount: null, rows: [] };
+      }
+      if (q === "ROLLBACK") {
+        rollbacks++;
+        return { rowCount: null, rows: [] };
+      }
+
+      return { rowCount: 1, rows: [] };
+    },
+    release() {}
+  };
+
+  const testHandler = createHandler({
+    receiverResolver: async () => process.env.T2T_TRON_RECEIVER_ADDRESS,
+    jwtFactory: () => "test-only-jwt",
+    poolProvider: () => ({ connect: async () => client }),
+    fetchImpl: async input => {
+      fetchCalls++;
+      const url = new URL(String(input));
+
+      if (url.pathname.includes("/transactions/") &&
+          url.pathname.endsWith("/events")) {
+        const timestamp = transferTimestamp;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [{
+              transaction_id: txid,
+              event_index: 0,
+              block_timestamp: timestamp,
+              contract_address: contract,
+              event_name: "Transfer",
+              result: {
+                from: senderAddress,
+                to: receiver,
+                value: rawAmount
+              },
+              success: true
+            }],
+            meta: {}
+          })
+        };
+      }
+
+      if (url.pathname.includes("/accounts/") &&
+          url.pathname.endsWith("/transactions/trc20")) {
+        const timestamp = Number(url.searchParams.get("min_timestamp")) + 1000;
+        transferTimestamp = timestamp;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [{
+              transaction_id: txid,
+              from: senderAddress,
+              to: receiver,
+              token_info: { address: contract },
+              value: rawAmount,
+              block_timestamp: timestamp
+            }],
+            meta: {}
+          })
+        };
+      }
+
+      throw new Error("Unexpected test provider URL: " + url.pathname);
+    }
+  });
+
+  const res = {
+    setHeader() {},
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(body) {
+      responseBody = body;
+      return this;
+    }
+  };
+
+  try {
+    assert.ok(senderAddress, "test sender must be a valid normalized TRON address");
+
+    await testHandler({
+      method: "POST",
+      headers: { authorization: "Bearer test-only-secret" }
+    }, res);
+
+    assert.equal(statusCode, 200);
+    assert.ok(fetchCalls > 0);
+    assert.equal(depositInserts.length, 1);
+    assert.ok(
+      queries.some(sql => /FROM public\.t2t_payment_orders/i.test(sql)),
+      "sync must query eligible payment orders inside the transaction"
+    );
+    assert.ok(
+      queries.includes("MATCHED_ORDER_UPDATE"),
+      "sync must attempt the unique payment-order confirmation"
+    );
     assert.ok(commits > 0);
     assert.equal(rollbacks, 0);
     assert.equal(releaseQueries, 1);
