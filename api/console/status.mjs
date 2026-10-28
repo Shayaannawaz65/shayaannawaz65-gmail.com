@@ -1,6 +1,7 @@
 import { createDbHealthHandler } from "../tron/db-health.mjs";
 import { createProviderHealthHandler } from "../tron/provider-health.mjs";
 import pg from "pg";
+import { normalizeTronAddress } from "../tron/address.mjs";
 
 const { Pool } = pg;
 let pool;
@@ -16,11 +17,11 @@ function responseCapture() {
   };
 }
 
-function connectionPool() {
+function connectionPool(env = process.env) {
   if (!pool) {
-    const connectionString = process.env.DATABASE_URL_UNPOOLED ||
-      process.env.POSTGRES_URL_NON_POOLING ||
-      process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    const connectionString = env.DATABASE_URL_UNPOOLED ||
+      env.POSTGRES_URL_NON_POOLING ||
+      env.DATABASE_URL || env.POSTGRES_URL;
     if (!connectionString || connectionString.includes("[SENSITIVE]")) {
       throw new Error("Database configuration unavailable");
     }
@@ -49,7 +50,9 @@ async function runCheck(handler, req) {
   }
 }
 
-export default async function handler(req, res) {
+export function createHandler({ poolProvider, env = process.env, now = () => Date.now() } = {}) {
+  poolProvider ||= () => connectionPool(env);
+  return async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
@@ -61,18 +64,18 @@ export default async function handler(req, res) {
     value.trim().length > 0 &&
     !value.includes("[SENSITIVE]");
 
-  const token = process.env.T2T_TRON_SYNC_TOKEN || "";
+  const token = env.T2T_TRON_SYNC_TOKEN || "";
   const databaseConfigured = [
-    process.env.DATABASE_URL_UNPOOLED,
-    process.env.POSTGRES_URL_NON_POOLING,
-    process.env.DATABASE_URL,
-    process.env.POSTGRES_URL
+    env.DATABASE_URL_UNPOOLED,
+    env.POSTGRES_URL_NON_POOLING,
+    env.DATABASE_URL,
+    env.POSTGRES_URL
   ].some(usable);
 
   const providerConfigured = [
-    process.env.TRONGRID_API_KEY,
-    process.env.TRONGRID_JWT_PRIVATE_KEY,
-    process.env.TRONGRID_JWT_KEY_ID
+    env.TRONGRID_API_KEY,
+    env.TRONGRID_JWT_PRIVATE_KEY,
+    env.TRONGRID_JWT_KEY_ID
   ].every(usable);
 
   const internalReq = {
@@ -82,10 +85,10 @@ export default async function handler(req, res) {
 
   const [database, provider] = await Promise.all([
     usable(token) && databaseConfigured
-      ? runCheck(createDbHealthHandler(), internalReq)
+      ? runCheck(createDbHealthHandler({ env }), internalReq)
       : Promise.resolve({ status: "configuration_incomplete" }),
     usable(token) && providerConfigured
-      ? runCheck(createProviderHealthHandler(), internalReq)
+      ? runCheck(createProviderHealthHandler({ env }), internalReq)
       : Promise.resolve({ status: "configuration_incomplete" })
   ]);
 
@@ -97,7 +100,7 @@ export default async function handler(req, res) {
   };
 
   try {
-    const result = await connectionPool().query(
+    const result = await poolProvider().query(
       `SELECT terminal_id, last_seen_at, status
          FROM public.t2t_trusted_terminals
         WHERE terminal_id = $1`,
@@ -113,7 +116,7 @@ export default async function handler(req, res) {
     } else {
       const row = result.rows[0];
       const lastSeen = row.last_seen_at ? new Date(row.last_seen_at) : null;
-      const recent = lastSeen && Date.now() - lastSeen.getTime() <= 2 * 60 * 1000;
+      const recent = lastSeen && now() - lastSeen.getTime() <= 2 * 60 * 1000;
       terminal = {
         status: row.status !== "ACTIVE" ? "revoked" :
           recent ? "connected" : lastSeen ? "stale" : "awaiting_heartbeat",
@@ -127,6 +130,51 @@ export default async function handler(req, res) {
     }
   } catch {
     // Never expose DB connection details in the public dashboard response.
+  }
+
+  let merchantBranch = {
+    status: "unavailable",
+    detail: "Merchant mapping table unavailable; verify migration"
+  };
+
+  try {
+    const mappingResult = await poolProvider().query(
+      `SELECT m.internal_mid, m.receiver_id, m.receiver_address,
+              m.status AS mapping_status, t.status AS terminal_status
+         FROM public.t2t_terminal_merchant_mapping m
+         JOIN public.t2t_trusted_terminals t
+           ON t.terminal_id = m.terminal_id
+        WHERE m.terminal_id = $1`,
+      ["OFFLINE-201.3-001"]
+    );
+
+    if (mappingResult.rowCount === 0) {
+      merchantBranch = {
+        status: "not_configured",
+        detail: "No merchant and receiver mapping exists for this terminal"
+      };
+    } else {
+      const m = mappingResult.rows[0];
+      const addressValid =
+        typeof m.receiver_address === "string" &&
+        normalizeTronAddress(m.receiver_address) === m.receiver_address;
+      const active = m.mapping_status === "ACTIVE" &&
+                     m.terminal_status === "ACTIVE" &&
+                     addressValid;
+
+      merchantBranch = {
+        status: m.mapping_status === "REVOKED" ? "revoked" :
+          !addressValid ? "invalid_address" :
+          active ? "configured" : "inactive",
+        detail: !addressValid
+          ? "Stored receiver address is invalid; mapping cannot be considered active"
+          : active
+            ? "Internal merchant and receiver mapping is active"
+            : "Mapping is not active; verify mapping and terminal status"
+      };
+    }
+  } catch {
+    // Do not expose database errors or connection details.
   }
 
   return res.status(200).json({
@@ -152,19 +200,16 @@ export default async function handler(req, res) {
           "TronGrid provider check unavailable"
     },
     terminal,
-    merchantBranch: {
-      status: "not_configured",
-      detail: "Merchant and branch mapping has not been configured"
-    },
+    merchantBranch,
     transactionFeed: {
-      status: typeof process.env.T2T_CONSOLE_FEED_TOKEN === "string" &&
-        process.env.T2T_CONSOLE_FEED_TOKEN.trim().length >= 32 &&
-        !process.env.T2T_CONSOLE_FEED_TOKEN.includes("[SENSITIVE]")
+      status: typeof env.T2T_CONSOLE_FEED_TOKEN === "string" &&
+        env.T2T_CONSOLE_FEED_TOKEN.trim().length >= 32 &&
+        !env.T2T_CONSOLE_FEED_TOKEN.includes("[SENSITIVE]")
           ? "configured"
           : "not_configured",
-      detail: typeof process.env.T2T_CONSOLE_FEED_TOKEN === "string" &&
-        process.env.T2T_CONSOLE_FEED_TOKEN.trim().length >= 32 &&
-        !process.env.T2T_CONSOLE_FEED_TOKEN.includes("[SENSITIVE]")
+      detail: typeof env.T2T_CONSOLE_FEED_TOKEN === "string" &&
+        env.T2T_CONSOLE_FEED_TOKEN.trim().length >= 32 &&
+        !env.T2T_CONSOLE_FEED_TOKEN.includes("[SENSITIVE]")
           ? "Read-only observed-transfer feed is configured; no approvals or settlements are performed"
           : "A dedicated feed credential is not configured"
     },
@@ -178,4 +223,7 @@ export default async function handler(req, res) {
       deposits_auto_approved: false
     }
   });
+};
 }
+
+export default createHandler();

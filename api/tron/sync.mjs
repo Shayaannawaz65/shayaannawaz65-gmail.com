@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import pg from "pg";
 import { createTronGridJwt } from "./jwt.mjs";
+import { normalizeTronAddress } from "./address.mjs";
 
 const { Pool } = pg;
 const USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
@@ -10,60 +11,6 @@ const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 let pool;
 
-export function normalizeTronAddress(value) {
-  const input = String(value || "");
-
-  if (ADDRESS_RE.test(input)) {
-    let n = 0n;
-    for (const char of input) {
-      const digit = BASE58.indexOf(char);
-      if (digit < 0) return "";
-      n = n * 58n + BigInt(digit);
-    }
-
-    let hexValue = n.toString(16);
-    if (hexValue.length % 2) hexValue = "0" + hexValue;
-    const decoded = n === 0n ? Buffer.alloc(0) : Buffer.from(hexValue, "hex");
-    let leadingZeros = 0;
-    while (leadingZeros < input.length && input[leadingZeros] === "1") {
-      leadingZeros++;
-    }
-    const bytes = Buffer.concat([Buffer.alloc(leadingZeros), decoded]);
-
-    if (bytes.length !== 25) return "";
-    const payload = bytes.subarray(0, 21);
-    const checksum = bytes.subarray(21);
-    if (payload[0] !== 0x41) return "";
-
-    const sha = b => crypto.createHash("sha256").update(b).digest();
-    if (!sha(sha(payload)).subarray(0, 4).equals(checksum)) return "";
-    return input;
-  }
-
-  let hex = input.replace(/^0x/i, "");
-  if (!/^[0-9a-f]{40}(?:[0-9a-f]{2})?$/i.test(hex)) return "";
-  if (hex.length === 40) {
-    hex = "41" + hex;
-  } else if (!hex.toLowerCase().startsWith("41")) {
-    return "";
-  }
-
-  const payload = Buffer.from(hex, "hex");
-  const sha = b => crypto.createHash("sha256").update(b).digest();
-  const bytes = Buffer.concat([payload, sha(sha(payload)).subarray(0, 4)]);
-
-  let n = BigInt("0x" + bytes.toString("hex"));
-  let encoded = "";
-  while (n > 0n) {
-    encoded = BASE58[Number(n % 58n)] + encoded;
-    n /= 58n;
-  }
-  for (const byte of bytes) {
-    if (byte !== 0) break;
-    encoded = "1" + encoded;
-  }
-  return encoded;
-}
 
 export function authorized(req, expected) {
   const header = req.headers.authorization || "";
@@ -107,10 +54,38 @@ function getPool() {
   return pool;
 }
 
+export async function resolveActiveReceiver(client) {
+  const result = await client.query(
+    `SELECT m.receiver_address,
+            m.status AS mapping_status,
+            t.status AS terminal_status
+       FROM public.t2t_terminal_merchant_mapping m
+       JOIN public.t2t_trusted_terminals t
+         ON t.terminal_id = m.terminal_id
+      WHERE m.terminal_id = $1`,
+    ["OFFLINE-201.3-001"]
+  );
+
+  const mapping = result.rows?.[0];
+  const receiver = mapping?.receiver_address;
+
+  if (
+    mapping?.mapping_status !== "ACTIVE" ||
+    mapping?.terminal_status !== "ACTIVE" ||
+    !ADDRESS_RE.test(receiver || "") ||
+    normalizeTronAddress(receiver) !== receiver
+  ) {
+    return null;
+  }
+
+  return receiver;
+}
+
 export function createHandler({
   poolProvider = getPool,
   fetchImpl = (...args) => fetch(...args),
-  jwtFactory = createTronGridJwt
+  jwtFactory = createTronGridJwt,
+  receiverResolver = resolveActiveReceiver
 } = {}) {
   return async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -121,13 +96,12 @@ export function createHandler({
   }
 
   const token = process.env.T2T_TRON_SYNC_TOKEN;
-  const receiver = process.env.T2T_TRON_RECEIVER_ADDRESS;
   const apiKey = process.env.TRONGRID_API_KEY;
   const jwtPrivateKey = process.env.TRONGRID_JWT_PRIVATE_KEY?.replace(/\\n/g, "\n");
   const jwtKeyId = process.env.TRONGRID_JWT_KEY_ID;
   const hasJwtConfiguration = Boolean(jwtPrivateKey && jwtKeyId);
 
-  if (!token || !ADDRESS_RE.test(receiver || "") || normalizeTronAddress(receiver) !== receiver || !apiKey || (!hasJwtConfiguration && jwtFactory === createTronGridJwt)) {
+  if (!token || !apiKey || (!hasJwtConfiguration && jwtFactory === createTronGridJwt)) {
     return res.status(503).json({ error: "Server configuration incomplete" });
   }
   if (!authorized(req, token)) {
@@ -135,10 +109,24 @@ export function createHandler({
   }
 
   let client;
+  let receiver;
   let leaseToken;
 
   try {
     client = await poolProvider().connect();
+
+    receiver = await receiverResolver(client);
+    if (
+      !receiver ||
+      !ADDRESS_RE.test(receiver) ||
+      normalizeTronAddress(receiver) !== receiver
+    ) {
+      return res.status(503).json({
+        error: "Active merchant receiver mapping unavailable",
+        retry_required: true,
+        auto_approval: false
+      });
+    }
 
     const now = Date.now();
     const overlapMs = 10 * 60 * 1000;
