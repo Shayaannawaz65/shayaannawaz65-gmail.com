@@ -5,7 +5,9 @@ import heartbeatHandler from './api/console/heartbeat.mjs';
 import consoleStatusHandler from "./api/console/status.mjs";
 import transactionsHandler from './api/console/transactions.mjs';
 import paymentOrdersHandler from './api/console/payment-orders.mjs';
+import paymentQuoteHandler from './api/console/payment-quote.mjs';
 import paymentStatusHandler from './api/console/payment-status.mjs';
+import paymentOrderListHandler from './api/console/payment-order-list.mjs';
 
 const app = express();
 app.disable('x-powered-by');
@@ -19,9 +21,11 @@ app.use(express.static(publicDir));
 app.post('/api/tron/sync', tronSyncHandler);
 app.post('/api/console/heartbeat', heartbeatHandler);
 app.post('/api/console/payment-orders', paymentOrdersHandler);
+app.post('/api/console/payment-quote', paymentQuoteHandler);
 app.all('/api/console/payment-status', paymentStatusHandler);
 app.get('/api/console/status', consoleStatusHandler);
 app.get('/api/console/transactions', transactionsHandler);
+app.get('/api/console/payment-order-list', paymentOrderListHandler);
 
 app.get('/health', (_req, res) => {
   res.json({

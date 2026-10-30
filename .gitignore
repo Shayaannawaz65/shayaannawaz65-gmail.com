@@ -15,3 +15,6 @@ backups/
 .t2t-sync-token
 
 .t2t-feed-token
+
+# Local cryptographic keys
+.local-keys/
