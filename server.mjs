@@ -5,7 +5,7 @@ import heartbeatHandler from './api/console/heartbeat.mjs';
 import consoleStatusHandler from "./api/console/status.mjs";
 import transactionsHandler from './api/console/transactions.mjs';
 import paymentOrdersHandler from './api/console/payment-orders.mjs';
-import paymentQuoteHandler from './api/console/payment-quote.mjs';
+import paymentQuoteHandler from './api/console/payment-quote-issuer.mjs';
 import paymentStatusHandler from './api/console/payment-status.mjs';
 import paymentOrderListHandler from './api/console/payment-order-list.mjs';
 
