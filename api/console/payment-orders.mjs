@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import pg from "pg";
 import { normalizeTronAddress } from "../tron/address.mjs";
+import { verifyPaymentQuote } from "../../lib/payment-quote.mjs";
 
 const { Pool } = pg;
 const TERMINAL_ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
@@ -64,6 +65,7 @@ export function createHandler({
     const invoiceReference = String(body.invoiceReference || "");
     const amountUsdCents = body.amountUsdCents;
     const amountUsdtRaw = String(body.amountUsdtRaw || "");
+    const quote = body.quote;
     const expiresInSeconds = body.expiresInSeconds;
 
     if (
@@ -121,6 +123,21 @@ export function createHandler({
       amountUsdtRaw,
       expiresInSeconds
     ].join("\n");
+
+    let verifiedQuote;
+    try {
+      verifiedQuote = verifyPaymentQuote({
+        quote,
+        terminalId,
+        invoiceReference,
+        amountUsdCents,
+        amountUsdtRaw,
+        now: now(),
+        publicKeyBase64: env.T2T_EXCHANGE_QUOTE_PUBLIC_KEY
+      });
+    } catch {
+      return res.status(401).json({ error: "Invalid or untrusted exchange-rate quote" });
+    }
 
     let client;
     let inTransaction = false;
@@ -203,13 +220,19 @@ export function createHandler({
            amount_usdt_raw,
            receiver_address,
            payment_token_hash,
+           quote_id,
+           exchange_rate_numerator,
+           exchange_rate_denominator,
+           exchange_rate_metadata,
+           quote_expires_at,
            expires_at
          )
          VALUES (
            $1, $2, 'USD', $3,
            'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
            $4, $5, $6,
-           NOW() + ($7 * INTERVAL '1 second')
+           $7, $8, $9, $10::jsonb, to_timestamp($11 / 1000.0),
+           NOW() + ($12 * INTERVAL '1 second')
          )
          RETURNING order_id, invoice_reference, amount_usd_cents,
                    amount_usdt_raw::text AS amount_usdt_raw,
@@ -221,6 +244,11 @@ export function createHandler({
           amountUsdtRaw,
           receiverAddress,
           tokenHash,
+          verifiedQuote.quoteId,
+          verifiedQuote.rateNumerator,
+          verifiedQuote.rateDenominator,
+          JSON.stringify(verifiedQuote.rateMetadata),
+          verifiedQuote.expiresAt,
           expiresInSeconds
         ]
       );

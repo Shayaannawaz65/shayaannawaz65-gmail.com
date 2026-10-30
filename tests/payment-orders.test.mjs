@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createHandler } from "../api/console/payment-orders.mjs";
+import {
+  buildPaymentQuoteCanonical,
+  calculateUsdtRaw
+} from "../lib/payment-quote.mjs";
 
 function makeResponse() {
   return {
@@ -27,6 +31,30 @@ const publicKeyBase64 = publicKey.export({
   type: "spki"
 }).toString("base64");
 
+const quoteKeys = crypto.generateKeyPairSync("ec", {
+  namedCurve: "prime256v1"
+});
+const quotePublicKeyBase64 = quoteKeys.publicKey.export({
+  format: "der",
+  type: "spki"
+}).toString("base64");
+
+const quoteRateNumerator = "2000000000000";
+const quoteRateDenominator = "1999800000000";
+const quoteMetadata = {
+  method: "kraken_coingecko_midpoint_v1",
+  quoteCurrency: "USD",
+  baseCurrency: "USDT",
+  krakenPriceUsdPerUsdt: "0.9998",
+  krakenTradeAt: now - 1000,
+  coingeckoPriceUsdPerUsdt: "1",
+  coingeckoUpdatedAt: now - 2000,
+  referencePriceUsdPerUsdt: "0.9999",
+  observedAt: now,
+  maxAgeMs: 30000,
+  maxDivergenceBps: 50
+};
+
 function makeBody(overrides = {}) {
   const fields = {
     terminalId,
@@ -34,7 +62,9 @@ function makeBody(overrides = {}) {
     nonce,
     invoiceReference: "INV-TEST-001",
     amountUsdCents: 1250,
-    amountUsdtRaw: "12500000",
+    amountUsdtRaw: calculateUsdtRaw(
+      1250, quoteRateNumerator, quoteRateDenominator
+    ),
     expiresInSeconds: 900
   };
 
@@ -49,8 +79,33 @@ function makeBody(overrides = {}) {
     fields.expiresInSeconds
   ].join("\n");
 
+  const quoteId = "quote-test-id-00000001";
+  const quoteExpiresAt = now + 30_000;
+  const quoteCanonical = buildPaymentQuoteCanonical({
+    quoteId,
+    terminalId: fields.terminalId,
+    invoiceReference: fields.invoiceReference,
+    amountUsdCents: fields.amountUsdCents,
+    rateNumerator: quoteRateNumerator,
+    rateDenominator: quoteRateDenominator,
+    expiresAt: quoteExpiresAt,
+    rateMetadata: quoteMetadata
+  });
+
   return {
     ...fields,
+    quote: {
+      quoteId,
+      rateNumerator: quoteRateNumerator,
+      rateDenominator: quoteRateDenominator,
+      rateMetadata: quoteMetadata,
+      expiresAt: quoteExpiresAt,
+      signature: crypto.sign(
+        "sha256",
+        Buffer.from(quoteCanonical, "utf8"),
+        quoteKeys.privateKey
+      ).toString("base64")
+    },
     signature: crypto.sign(
       "sha256",
       Buffer.from(canonical, "utf8"),
@@ -113,7 +168,10 @@ function mockPool({ trusted = true } = {}) {
   };
 }
 
-const env = { T2T_PAYMENT_BASE_URL: "https://payments.example.test" };
+const env = {
+  T2T_PAYMENT_BASE_URL: "https://payments.example.test",
+  T2T_EXCHANGE_QUOTE_PUBLIC_KEY: quotePublicKeyBase64
+};
 
 test("payment order endpoint only allows POST", async () => {
   const res = makeResponse();
@@ -190,7 +248,7 @@ test("valid signed order inserts a pending order using mock database", async () 
   assert.equal(res.body.status, "PENDING");
   assert.equal(res.body.currency, "USD");
   assert.equal(res.body.amountUsdCents, 1250);
-  assert.equal(res.body.amountUsdtRaw, "12500000");
+  assert.equal(res.body.amountUsdtRaw, "12501250");
   assert.match(res.body.paymentUrl, /^https:\/\/payments\.example\.test\/pay\.html\?token=[A-Za-z0-9_-]{43}$/);
   assert.equal(pool.state.inserted, true);
   assert.equal(pool.state.committed, true);
@@ -201,4 +259,5 @@ test("valid signed order inserts a pending order using mock database", async () 
   assert.ok(insert);
   assert.equal(insert.params[5].length, 64);
   assert.equal(insert.params[5].includes("070707"), false);
+  assert.deepEqual(JSON.parse(insert.params[9]), quoteMetadata);
 });

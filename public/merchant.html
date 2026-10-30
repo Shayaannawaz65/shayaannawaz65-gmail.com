@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>T2T Merchant Payments</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#10151e;color:#edf2f7}
+body{margin:0;padding:24px;max-width:1200px;margin-inline:auto}
+h1{margin-bottom:6px}p{color:#aebdce}
+form,.panel{background:#192230;border:1px solid #344255;border-radius:12px;padding:16px;margin:16px 0}
+input,button,select{font:inherit;padding:10px;border-radius:7px;border:1px solid #52647a;margin:4px}
+input{background:#10151e;color:white;max-width:100%}
+button{background:#c6f36b;color:#17210b;border:0;font-weight:700;cursor:pointer}
+button.secondary{background:#344255;color:white}
+#message{white-space:pre-wrap}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:950px}
+th,td{text-align:left;padding:11px;border-bottom:1px solid #344255;vertical-align:top}
+th{color:#c6f36b}
+small{color:#aebdce}
+code{overflow-wrap:anywhere}
+.status{font-weight:700}
+.error{color:#ff9d9d}
+.good{color:#c6f36b}
+</style>
+</head>
+<body>
+<h1>T2T Merchant Payments</h1>
+<p>Read-only payment-order dashboard. Blockchain confirmation and fund forwarding are separate statuses.</p>
+
+<form id="login">
+  <label for="token">Merchant dashboard access token</label><br>
+  <input id="token" type="password" autocomplete="current-password"
+    required minlength="32" style="width:min(600px,90%)"
+    placeholder="Enter the configured dashboard token">
+  <button type="submit">Connect</button>
+  <button type="button" class="secondary" id="logout">Disconnect</button>
+</form>
+
+<section class="panel">
+  <button id="refresh" type="button">Refresh orders</button>
+  <button id="previous" type="button" class="secondary">Previous</button>
+  <button id="next" type="button" class="secondary">Next</button>
+  <span id="page"></span>
+  <p id="message" role="status">Enter your dashboard token to load orders.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Created</th><th>Invoice</th><th>USD</th><th>USDT raw units</th>
+        <th>Payment status</th><th>Expiry / confirmation</th>
+        <th>TRON transaction</th><th>Forwarding</th>
+      </tr></thead>
+      <tbody id="orders"></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  let token = "";
+  let offset = 0;
+  const limit = 25;
+
+  function message(text, error = false) {
+    $("message").textContent = text;
+    $("message").className = error ? "error" : "";
+  }
+
+  function cell(row, text) {
+    const td = document.createElement("td");
+    td.textContent = text == null || text === "" ? "—" : String(text);
+    row.appendChild(td);
+    return td;
+  }
+
+  function date(value) {
+    if (!value) return "—";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
+  }
+
+  async function load() {
+    if (!token) {
+      message("Connect using the configured merchant dashboard token.", true);
+      return;
+    }
+
+    $("refresh").disabled = true;
+    message("Loading payment orders…");
+
+    try {
+      const response = await fetch(
+        `/api/console/payment-order-list?limit=${limit}&offset=${offset}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+          credentials: "same-origin"
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 401) {
+          token = "";
+          $("token").value = "";
+        }
+        throw new Error(data.error || `Request failed (${response.status})`);
+      }
+
+      const body = $("orders");
+      body.replaceChildren();
+
+      for (const order of data.records || []) {
+        const tr = document.createElement("tr");
+        cell(tr, date(order.createdAt));
+        cell(tr, order.invoiceReference);
+        cell(tr, `${order.currency} ${(Number(order.amountUsdCents) / 100).toFixed(2)}`);
+        cell(tr, order.amountUsdtRaw);
+
+        const status = cell(tr, order.status);
+        status.className = "status";
+
+        cell(tr, `Expires: ${date(order.expiresAt)}\nConfirmed: ${date(order.confirmedAt)}`);
+        const tx = cell(tr, order.transactionId
+          ? `${order.transactionId}${order.eventIndex == null ? "" : ` / event ${order.eventIndex}`}`
+          : "Not confirmed");
+        if (order.transactionId) {
+          const code = document.createElement("code");
+          code.textContent = order.transactionId;
+          tx.replaceChildren(code);
+        }
+        cell(tr, `${order.forwardingStatus || "NOT_STARTED"}\n${order.forwardingTransactionId || ""}`);
+        body.appendChild(tr);
+      }
+
+      $("page").textContent =
+        `Showing ${data.pagination.returned} · offset ${offset}`;
+      message(`Loaded ${data.pagination.returned} order(s). This page is read-only.`);
+    } catch (error) {
+      message(error.message || "Unable to load orders.", true);
+    } finally {
+      $("refresh").disabled = false;
+    }
+  }
+
+  $("login").addEventListener("submit", event => {
+    event.preventDefault();
+    token = $("token").value.trim();
+    offset = 0;
+    load();
+  });
+  $("refresh").addEventListener("click", load);
+  $("previous").addEventListener("click", () => {
+    offset = Math.max(0, offset - limit);
+    load();
+  });
+  $("next").addEventListener("click", () => {
+    offset += limit;
+    load();
+  });
+  $("logout").addEventListener("click", () => {
+    token = "";
+    $("token").value = "";
+    $("orders").replaceChildren();
+    $("page").textContent = "";
+    message("Disconnected. The token is not saved in browser storage.");
+  });
+})();
+</script>
+</body>
+</html>
