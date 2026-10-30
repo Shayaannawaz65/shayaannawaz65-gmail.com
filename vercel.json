@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/console/payment-quote",
+      "destination": "/api/console/payment-quote-issuer"
+    }
+  ]
+}
