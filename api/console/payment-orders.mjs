@@ -6,6 +6,7 @@ import { verifyPaymentQuote } from "../../lib/payment-quote.mjs";
 const { Pool } = pg;
 const TERMINAL_ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const NONCE_RE = /^[a-f0-9]{32,64}$/i;
+const KEY_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 const INVOICE_RE = /^[A-Za-z0-9._/-]{1,120}$/;
 const RAW_AMOUNT_RE = /^[1-9][0-9]{0,77}$/;
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
@@ -61,7 +62,8 @@ export function createHandler({
     const terminalId = String(body.terminalId || "");
     const timestamp = Number(body.timestamp);
     const nonce = String(body.nonce || "");
-    const signatureB64 = String(body.signature || "");
+    const keyId = String(req.headers?.["x-t2t-key-id"] || "");
+    const signatureB64 = String(req.headers?.["x-t2t-signature"] || "");
     const invoiceReference = String(body.invoiceReference || "");
     const amountUsdCents = body.amountUsdCents;
     const amountUsdtRaw = String(body.amountUsdtRaw || "");
@@ -70,6 +72,7 @@ export function createHandler({
 
     if (
       !TERMINAL_ID_RE.test(terminalId) ||
+      !KEY_ID_RE.test(keyId) ||
       !Number.isSafeInteger(timestamp) ||
       Math.abs(now() - timestamp) > MAX_CLOCK_SKEW_MS ||
       !NONCE_RE.test(nonce) ||
@@ -89,14 +92,11 @@ export function createHandler({
     let signature;
     try {
       signature = Buffer.from(signatureB64, "base64");
-      if (
-        signature.length < 32 ||
-        signature.toString("base64") !== signatureB64
-      ) {
-        return res.status(400).json({ error: "Invalid payment order" });
+      if (signature.length < 32 || signature.toString("base64") !== signatureB64) {
+        return res.status(400).json({ error: "Invalid S2S signature" });
       }
     } catch {
-      return res.status(400).json({ error: "Invalid payment order" });
+      return res.status(400).json({ error: "Invalid S2S signature" });
     }
 
     const baseUrl = String(env.T2T_PAYMENT_BASE_URL || "").replace(/\/+$/, "");
@@ -113,15 +113,26 @@ export function createHandler({
       return res.status(503).json({ error: "Payment link configuration unavailable" });
     }
 
+    const quoteSignature = String(quote?.signature || "");
+    const quoteMetadataHash = crypto.createHash("sha256")
+      .update(JSON.stringify(quote?.rateMetadata ?? null))
+      .digest("hex");
     const canonical = [
-      "T2T_PAYMENT_ORDER_V1",
+      "T2T_S2S_PAYMENT_ORDER_V1",
+      keyId,
       terminalId,
       timestamp,
       nonce,
       invoiceReference,
       amountUsdCents,
       amountUsdtRaw,
-      expiresInSeconds
+      expiresInSeconds,
+      String(quote?.quoteId || ""),
+      String(quote?.rateNumerator || ""),
+      String(quote?.rateDenominator || ""),
+      String(quote?.expiresAt || ""),
+      quoteSignature,
+      quoteMetadataHash
     ].join("\n");
 
     let verifiedQuote;
@@ -148,18 +159,16 @@ export function createHandler({
       inTransaction = true;
 
       const trusted = await client.query(
-        `SELECT t.public_key_base64,
-                m.internal_mid,
-                m.receiver_id,
-                m.receiver_address
+        `SELECT t.terminal_id,
+                mk.public_key_base64 AS merchant_public_key_base64
            FROM public.t2t_trusted_terminals t
-           JOIN public.t2t_terminal_merchant_mapping m
-             ON m.terminal_id = t.terminal_id
+           JOIN public.t2t_s2s_client_keys mk
+             ON mk.key_id = $2
+            AND mk.status = 'ACTIVE'
           WHERE t.terminal_id = $1
             AND t.status = 'ACTIVE'
-            AND m.status = 'ACTIVE'
-          FOR UPDATE OF t, m`,
-        [terminalId]
+          FOR UPDATE OF t, mk`,
+        [terminalId, keyId]
       );
 
       if (trusted.rowCount !== 1) {
@@ -171,7 +180,7 @@ export function createHandler({
       let verified = false;
       try {
         const publicKey = crypto.createPublicKey({
-          key: Buffer.from(trusted.rows[0].public_key_base64, "base64"),
+          key: Buffer.from(trusted.rows[0].merchant_public_key_base64, "base64"),
           format: "der",
           type: "spki"
         });
@@ -188,10 +197,10 @@ export function createHandler({
       if (!verified) {
         await client.query("ROLLBACK");
         inTransaction = false;
-        return res.status(401).json({ error: "Invalid terminal signature" });
+        return res.status(401).json({ error: "Invalid S2S signature" });
       }
 
-      const receiverAddress = trusted.rows[0].receiver_address;
+      const receiverAddress = env.T2T_TRON_RECEIVER_ADDRESS || "";
       if (
         typeof receiverAddress !== "string" ||
         normalizeTronAddress(receiverAddress) !== receiverAddress
@@ -202,9 +211,9 @@ export function createHandler({
       }
 
       await client.query(
-        `INSERT INTO public.t2t_heartbeat_nonces (terminal_id, nonce)
+        `INSERT INTO public.t2t_s2s_request_nonces (key_id, nonce)
          VALUES ($1, $2)`,
-        [terminalId, nonce]
+        [keyId, nonce]
       );
 
       const token = randomBytes(32).toString("base64url");
@@ -213,6 +222,7 @@ export function createHandler({
       const inserted = await client.query(
         `INSERT INTO public.t2t_payment_orders (
            terminal_id,
+           s2s_key_id,
            invoice_reference,
            currency,
            amount_usd_cents,
@@ -228,17 +238,18 @@ export function createHandler({
            expires_at
          )
          VALUES (
-           $1, $2, 'USD', $3,
+           $1, $2, $3, 'USD', $4,
            'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-           $4, $5, $6,
-           $7, $8, $9, $10::jsonb, to_timestamp($11 / 1000.0),
-           NOW() + ($12 * INTERVAL '1 second')
+           $5, $6, $7,
+           $8, $9, $10, $11::jsonb, to_timestamp($12 / 1000.0),
+           NOW() + ($13 * INTERVAL '1 second')
          )
          RETURNING order_id, invoice_reference, amount_usd_cents,
                    amount_usdt_raw::text AS amount_usdt_raw,
                    receiver_address, expires_at, status`,
         [
           terminalId,
+          keyId,
           invoiceReference,
           amountUsdCents,
           amountUsdtRaw,
@@ -268,8 +279,6 @@ export function createHandler({
         status: order.status,
         expiresAt: new Date(order.expires_at).toISOString(),
         paymentUrl: `${baseUrl}/pay.html?token=${token}`,
-        merchantId: trusted.rows[0].internal_mid,
-        receiverId: trusted.rows[0].receiver_id
       });
     } catch (error) {
       if (client && inTransaction) {

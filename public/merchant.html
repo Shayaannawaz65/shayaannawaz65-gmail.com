@@ -28,7 +28,7 @@ code{overflow-wrap:anywhere}
 </head>
 <body>
 <h1>T2T Merchant Payments</h1>
-<p>Read-only payment-order dashboard. Blockchain confirmation and fund forwarding are separate statuses.</p>
+<p>Read-only payment-order dashboard. Payments are verified directly at the configured Binance USDT TRC20 receiving address.</p>
 
 <form id="login">
   <label for="token">Merchant dashboard access token</label><br>
@@ -50,7 +50,7 @@ code{overflow-wrap:anywhere}
       <thead><tr>
         <th>Created</th><th>Invoice</th><th>USD</th><th>USDT raw units</th>
         <th>Payment status</th><th>Expiry / confirmation</th>
-        <th>TRON transaction</th><th>Forwarding</th>
+        <th>TRON transaction</th>
       </tr></thead>
       <tbody id="orders"></tbody>
     </table>
@@ -134,7 +134,6 @@ code{overflow-wrap:anywhere}
           code.textContent = order.transactionId;
           tx.replaceChildren(code);
         }
-        cell(tr, `${order.forwardingStatus || "NOT_STARTED"}\n${order.forwardingTransactionId || ""}`);
         body.appendChild(tr);
       }
 

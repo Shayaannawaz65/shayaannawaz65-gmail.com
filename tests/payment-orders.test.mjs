@@ -20,6 +20,7 @@ function makeResponse() {
 
 const now = 1_800_000_000_000;
 const terminalId = "OFFLINE-201.3-001";
+const keyId = "merchant-key-test-001";
 const nonce = "abcdef0123456789abcdef0123456789";
 
 const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", {
@@ -68,17 +69,6 @@ function makeBody(overrides = {}) {
     expiresInSeconds: 900
   };
 
-  const canonical = [
-    "T2T_PAYMENT_ORDER_V1",
-    fields.terminalId,
-    fields.timestamp,
-    fields.nonce,
-    fields.invoiceReference,
-    fields.amountUsdCents,
-    fields.amountUsdtRaw,
-    fields.expiresInSeconds
-  ].join("\n");
-
   const quoteId = "quote-test-id-00000001";
   const quoteExpiresAt = now + 30_000;
   const quoteCanonical = buildPaymentQuoteCanonical({
@@ -106,11 +96,6 @@ function makeBody(overrides = {}) {
         quoteKeys.privateKey
       ).toString("base64")
     },
-    signature: crypto.sign(
-      "sha256",
-      Buffer.from(canonical, "utf8"),
-      privateKey
-    ).toString("base64"),
     ...overrides
   };
 }
@@ -125,21 +110,18 @@ function mockPool({ trusted = true } = {}) {
         async query(sql, params = []) {
           state.queries.push({ sql, params });
 
-          if (sql.includes("SELECT t.public_key_base64")) {
+          if (sql.includes("SELECT t.terminal_id")) {
             return trusted
               ? {
                   rowCount: 1,
                   rows: [{
-                    public_key_base64: publicKeyBase64,
-                    internal_mid: "mid-test",
-                    receiver_id: "receiver-test",
-                    receiver_address: "TExAW9464LvbWmAsbcmNhvHQwawUn8rmN2"
+                    merchant_public_key_base64: publicKeyBase64
                   }]
                 }
               : { rowCount: 0, rows: [] };
           }
 
-          if (sql.includes("INSERT INTO public.t2t_heartbeat_nonces")) {
+          if (sql.includes("INSERT INTO public.t2t_s2s_request_nonces")) {
             return { rowCount: 1, rows: [] };
           }
 
@@ -149,10 +131,10 @@ function mockPool({ trusted = true } = {}) {
               rowCount: 1,
               rows: [{
                 order_id: "00000000-0000-4000-8000-000000000001",
-                invoice_reference: params[1],
-                amount_usd_cents: params[2],
-                amount_usdt_raw: params[3],
-                receiver_address: params[4],
+                invoice_reference: params[2],
+                amount_usd_cents: params[3],
+                amount_usdt_raw: params[4],
+                receiver_address: params[5],
                 expires_at: new Date(now + 900000),
                 status: "PENDING"
               }]
@@ -170,8 +152,16 @@ function mockPool({ trusted = true } = {}) {
 
 const env = {
   T2T_PAYMENT_BASE_URL: "https://payments.example.test",
+  T2T_TRON_RECEIVER_ADDRESS: "TExAW9464LvbWmAsbcmNhvHQwawUn8rmN2",
   T2T_EXCHANGE_QUOTE_PUBLIC_KEY: quotePublicKeyBase64
 };
+
+function signedHeaders(body, signatureOverride) {
+  const q = body.quote;
+  const metadataHash = crypto.createHash("sha256").update(JSON.stringify(q?.rateMetadata ?? null)).digest("hex");
+  const canonical = ["T2T_S2S_PAYMENT_ORDER_V1", keyId, body.terminalId, body.timestamp, body.nonce, body.invoiceReference, body.amountUsdCents, body.amountUsdtRaw, body.expiresInSeconds, String(q?.quoteId || ""), String(q?.rateNumerator || ""), String(q?.rateDenominator || ""), String(q?.expiresAt || ""), String(q?.signature || ""), metadataHash].join("\n");
+  return {"x-t2t-key-id":keyId,"x-t2t-signature":signatureOverride || crypto.sign("sha256",Buffer.from(canonical),privateKey).toString("base64")};
+}
 
 test("payment order endpoint only allows POST", async () => {
   const res = makeResponse();
@@ -196,7 +186,7 @@ test("rejects malformed order before database access", async () => {
     },
     env,
     now: () => now
-  })({ method: "POST", body: makeBody({ amountUsdCents: 0 }) }, res);
+  })({ method: "POST", headers: signedHeaders(makeBody({ amountUsdCents: 0 })), body: makeBody({ amountUsdCents: 0 }) }, res);
 
   assert.equal(res.statusCode, 400);
   assert.equal(connected, false);
@@ -210,7 +200,7 @@ test("rejects an untrusted terminal", async () => {
     poolProvider: () => pool,
     env,
     now: () => now
-  })({ method: "POST", body: makeBody() }, res);
+  })({ method: "POST", headers: signedHeaders(makeBody()), body: makeBody() }, res);
 
   assert.equal(res.statusCode, 401);
   assert.equal(pool.state.inserted, false);
@@ -226,7 +216,8 @@ test("rejects invalid signature without creating an order", async () => {
     now: () => now
   })({
     method: "POST",
-    body: makeBody({ signature: Buffer.alloc(64, 1).toString("base64") })
+    headers: signedHeaders(makeBody(), Buffer.alloc(64, 1).toString("base64")),
+    body: makeBody()
   }, res);
 
   assert.equal(res.statusCode, 401);
@@ -242,10 +233,12 @@ test("valid signed order inserts a pending order using mock database", async () 
     env,
     now: () => now,
     randomBytes: size => Buffer.alloc(size, 7)
-  })({ method: "POST", body: makeBody() }, res);
+  })({ method: "POST", headers: signedHeaders(makeBody()), body: makeBody() }, res);
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.status, "PENDING");
+  assert.equal("merchantId" in res.body, false);
+  assert.equal("receiverId" in res.body, false);
   assert.equal(res.body.currency, "USD");
   assert.equal(res.body.amountUsdCents, 1250);
   assert.equal(res.body.amountUsdtRaw, "12501250");
@@ -257,7 +250,8 @@ test("valid signed order inserts a pending order using mock database", async () 
     q.sql.includes("INSERT INTO public.t2t_payment_orders")
   );
   assert.ok(insert);
-  assert.equal(insert.params[5].length, 64);
+  assert.equal(insert.params[6].length, 64);
+  assert.equal(insert.params[1], keyId);
   assert.equal(insert.params[5].includes("070707"), false);
-  assert.deepEqual(JSON.parse(insert.params[9]), quoteMetadata);
+  assert.deepEqual(JSON.parse(insert.params[10]), quoteMetadata);
 });

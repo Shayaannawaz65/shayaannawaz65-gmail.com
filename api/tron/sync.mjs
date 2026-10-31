@@ -55,30 +55,13 @@ function getPool() {
   return pool;
 }
 
-export async function resolveActiveReceiver(client) {
-  const result = await client.query(
-    `SELECT m.receiver_address,
-            m.status AS mapping_status,
-            t.status AS terminal_status
-       FROM public.t2t_terminal_merchant_mapping m
-       JOIN public.t2t_trusted_terminals t
-         ON t.terminal_id = m.terminal_id
-      WHERE m.terminal_id = $1`,
-    ["OFFLINE-201.3-001"]
-  );
-
-  const mapping = result.rows?.[0];
-  const receiver = mapping?.receiver_address;
-
+export async function resolveActiveReceiver(_client, env = process.env) {
+  const receiver = env.T2T_TRON_RECEIVER_ADDRESS || "";
   if (
-    mapping?.mapping_status !== "ACTIVE" ||
-    mapping?.terminal_status !== "ACTIVE" ||
-    !ADDRESS_RE.test(receiver || "") ||
+    typeof receiver !== "string" ||
+    !ADDRESS_RE.test(receiver) ||
     normalizeTronAddress(receiver) !== receiver
-  ) {
-    return null;
-  }
-
+  ) return null;
   return receiver;
 }
 
@@ -86,7 +69,7 @@ export function createHandler({
   poolProvider = getPool,
   fetchImpl = (...args) => fetch(...args),
   jwtFactory = createTronGridJwt,
-  receiverResolver = resolveActiveReceiver
+  receiverResolver = (client) => resolveActiveReceiver(client, process.env)
 } = {}) {
   return async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");

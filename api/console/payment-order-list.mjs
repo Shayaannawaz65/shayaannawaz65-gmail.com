@@ -32,20 +32,6 @@ function getPool() {
   return pool;
 }
 
-function tokenMatches(req, expected) {
-  const header = req.headers?.authorization;
-  if (typeof header !== "string" || !header.startsWith("Bearer ")) {
-    return false;
-  }
-
-  const supplied = Buffer.from(header.slice(7), "utf8");
-  const configured = Buffer.from(expected, "utf8");
-
-  return supplied.length > 0 &&
-    supplied.length === configured.length &&
-    crypto.timingSafeEqual(supplied, configured);
-}
-
 function iso(value) {
   return value == null ? null : new Date(value).toISOString();
 }
@@ -63,23 +49,30 @@ export function createHandler({
     }
 
     const expected = env.T2T_MERCHANT_DASHBOARD_TOKEN;
+    const supplied = String(req.headers?.authorization || "");
+    const token = supplied.startsWith("Bearer ") ? supplied.slice(7) : "";
     if (typeof expected !== "string" || expected.length < 32) {
-      return res.status(503).json({
-        error: "Merchant dashboard authentication is not configured"
-      });
+      return res.status(503).json({ error: "Dashboard authentication is not configured" });
     }
 
-    if (!tokenMatches(req, expected)) {
+    const a = Buffer.from(token);
+    const b = Buffer.from(expected);
+    if (!a.length || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
       return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const keyId = env.T2T_DASHBOARD_S2S_KEY_ID;
+    if (typeof keyId !== "string" || keyId.length < 8) {
+      return res.status(503).json({ error: "Dashboard merchant scope is not configured" });
     }
 
     const limitText = String(req.query?.limit ?? "25");
     const offsetText = String(req.query?.offset ?? "0");
 
     if (
-      !/^(?:[1-9]\d{0,2})$/.test(limitText) ||
+      !/^(?:[1-9]\\d{0,2})$/.test(limitText) ||
       Number(limitText) > 100 ||
-      !/^(?:0|[1-9]\d{0,8})$/.test(offsetText)
+      !/^(?:0|[1-9]\\d{0,8})$/.test(offsetText)
     ) {
       return res.status(400).json({
         error: "Invalid pagination; limit must be 1-100 and offset 0-999999999"
@@ -87,33 +80,19 @@ export function createHandler({
     }
 
     try {
-      const db = poolProvider();
-      const result = await db.query(
-        `SELECT order_id,
-                terminal_id,
-                invoice_reference,
-                currency,
-                amount_usd_cents::text AS amount_usd_cents,
-                amount_usdt_raw::text AS amount_usdt_raw,
-                receiver_address,
-                CASE
-                  WHEN status = 'PENDING' AND expires_at <= NOW()
-                    THEN 'EXPIRED'
-                  ELSE status
-                END AS status,
-                matched_transaction_id,
-                matched_event_index,
-                forwarding_status,
-                forwarding_transaction_id,
-                expires_at,
-                confirmed_at,
-                forwarded_at,
-                created_at,
-                updated_at
-           FROM public.t2t_payment_orders
-          ORDER BY created_at DESC, order_id DESC
-          LIMIT $1 OFFSET $2`,
-        [Number(limitText), Number(offsetText)]
+      const result = await poolProvider().query(
+        `SELECT o.order_id, o.terminal_id, o.invoice_reference, o.currency,
+                o.amount_usd_cents::text AS amount_usd_cents,
+                o.amount_usdt_raw::text AS amount_usdt_raw, o.receiver_address,
+                CASE WHEN o.status = 'PENDING' AND o.expires_at <= NOW()
+                  THEN 'EXPIRED' ELSE o.status END AS status,
+                o.matched_transaction_id, o.matched_event_index,
+                o.expires_at, o.confirmed_at, o.created_at, o.updated_at
+           FROM public.t2t_payment_orders o
+          WHERE o.s2s_key_id = $1
+          ORDER BY o.created_at DESC, o.order_id DESC
+          LIMIT $2 OFFSET $3`,
+        [keyId, Number(limitText), Number(offsetText)]
       );
 
       const records = result.rows.map(row => ({
@@ -127,12 +106,8 @@ export function createHandler({
         status: row.status,
         transactionId: row.matched_transaction_id?.trim() ?? null,
         eventIndex: row.matched_event_index,
-        forwardingStatus: row.forwarding_status,
-        forwardingTransactionId:
-          row.forwarding_transaction_id?.trim() ?? null,
         expiresAt: iso(row.expires_at),
         confirmedAt: iso(row.confirmed_at),
-        forwardedAt: iso(row.forwarded_at),
         createdAt: iso(row.created_at),
         updatedAt: iso(row.updated_at)
       }));
@@ -153,9 +128,7 @@ export function createHandler({
         }
       });
     } catch {
-      return res.status(503).json({
-        error: "Payment order list unavailable"
-      });
+      return res.status(503).json({ error: "Payment order list unavailable" });
     }
   };
 }

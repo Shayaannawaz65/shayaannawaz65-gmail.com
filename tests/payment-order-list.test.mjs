@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHandler } from "../api/console/payment-order-list.mjs";
 
 const token = "test-merchant-dashboard-token-1234567890";
+const keyId = "merchant-key-test-001";
 
 function response() {
   return {
@@ -25,7 +26,7 @@ function request({ method = "GET", authorization, query = {} } = {}) {
 
 test("dashboard list is GET-only and disables caching", async () => {
   const res = response();
-  await createHandler({ env: { T2T_MERCHANT_DASHBOARD_TOKEN: token } })(
+  await createHandler({ env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId } })(
     request({ method: "POST" }), res
   );
   assert.equal(res.statusCode, 405);
@@ -48,7 +49,7 @@ test("unauthorized dashboard request never queries database", async () => {
   let queried = false;
   const res = response();
   await createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token },
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId },
     poolProvider: () => ({ query: async () => { queried = true; } })
   })(request({ authorization: "Bearer wrong-token" }), res);
   assert.equal(res.statusCode, 401);
@@ -58,7 +59,7 @@ test("unauthorized dashboard request never queries database", async () => {
 test("invalid pagination is rejected", async () => {
   const res = response();
   await createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token }
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId }
   })(request({
     authorization: `Bearer ${token}`,
     query: { limit: "101", offset: "-1" }
@@ -66,13 +67,13 @@ test("invalid pagination is rejected", async () => {
   assert.equal(res.statusCode, 400);
 });
 
-test("authorized listing returns safe fields and parameterized pagination", async () => {
+test("authorized listing returns payment fields scoped to its S2S key", async () => {
   let sql = "";
   let params;
   const res = response();
 
   const handler = createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token },
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId },
     poolProvider: () => ({
       query: async (statement, values) => {
         sql = statement;
@@ -89,11 +90,8 @@ test("authorized listing returns safe fields and parameterized pagination", asyn
             status: "CONFIRMED",
             matched_transaction_id: "a".repeat(64),
             matched_event_index: 2,
-            forwarding_status: "NOT_STARTED",
-            forwarding_transaction_id: null,
             expires_at: "2026-10-30T10:00:00Z",
             confirmed_at: "2026-10-29T10:00:00Z",
-            forwarded_at: null,
             created_at: "2026-10-29T09:00:00Z",
             updated_at: "2026-10-29T10:00:00Z",
             payment_token_hash: "must-not-return",
@@ -110,24 +108,26 @@ test("authorized listing returns safe fields and parameterized pagination", asyn
   }), res);
 
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(params, [10, 20]);
-  assert.match(sql, /LIMIT \$1 OFFSET \$2/);
-  assert.doesNotMatch(sql, /payment_token_hash|signing_key/);
+  assert.deepEqual(params, [keyId, 10, 20]);
+  assert.match(sql, /LIMIT \$2 OFFSET \$3/);
+  assert.match(sql, /WHERE o\.s2s_key_id = \$1/);
+  assert.doesNotMatch(sql, /t2t_usdt_forwarding_jobs|payment_token_hash|signing_key/);
   assert.equal(res.body.records.length, 1);
   assert.equal(res.body.records[0].amountUsdCents, "1250");
   assert.equal(res.body.records[0].status, "CONFIRMED");
-  assert.equal(res.body.records[0].forwardingStatus, "NOT_STARTED");
   assert.equal("payment_token_hash" in res.body.records[0], false);
   assert.equal("signing_key" in res.body.records[0], false);
+  assert.equal("forwardingStatus" in res.body.records[0], false);
   assert.equal(res.body.safety.databaseWrites, false);
 });
 
-test("database failure returns generic error", async () => {
+test("database failure returns generic error without referencing an uninitialized client", async () => {
   const res = response();
   await createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token },
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId },
     poolProvider: () => ({ query: async () => { throw new Error("private DB detail"); } })
   })(request({ authorization: `Bearer ${token}` }), res);
   assert.equal(res.statusCode, 503);
+  assert.deepEqual(res.body, { error: "Payment order list unavailable" });
   assert.doesNotMatch(JSON.stringify(res.body), /private DB detail/);
 });
