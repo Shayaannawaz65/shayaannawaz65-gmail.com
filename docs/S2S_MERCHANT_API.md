@@ -76,4 +76,4 @@ Set `T2T_TRON_RECEIVER_ADDRESS` to the central T2T TRON address. Both order crea
 
 ## Important current boundary
 
-The current scanner records and matches confirmed USDT transfers. Automatic forwarding to the final wallet is not active in this branch. Do not treat `CONFIRMED` as `FORWARDED`, and do not configure a hot-wallet signing key or move real funds until the separate forwarding state machine, transaction signing, fee handling, reconciliation and tests have been completed and explicitly approved.
+The scanner records and matches confirmed USDT transfers and creates one idempotent forwarding job per uniquely matched payment. Jobs remain `AWAITING_DESTINATION` until the final wallet is configured. No transaction is signed or broadcast by this branch. Do not treat `CONFIRMED` as `FORWARDED`; actual signing, fee handling, confirmation monitoring, reconciliation and explicit live-fund approval remain required.
