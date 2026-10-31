@@ -1,16 +1,16 @@
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import tronSyncHandler from './api/tron/sync.mjs';
-import heartbeatHandler from './api/console/heartbeat.mjs';
-import consoleStatusHandler from "./api/console/status.mjs";
-import transactionsHandler from './api/console/transactions.mjs';
-import paymentOrdersHandler from './api/console/payment-orders.mjs';
-import paymentQuoteHandler from './api/console/payment-quote-issuer.mjs';
-import paymentStatusHandler from './api/console/payment-status.mjs';
-import paymentOrderListHandler from './api/console/payment-order-list.mjs';
-import s2sTerminalAccessHandler from './api/console/s2s-terminal-access.mjs';
-import s2sTerminalAuditHandler from './api/console/s2s-terminal-audit.mjs';
-import s2sClientAdminHandler from './api/console/s2s-client-admin.mjs';
+import tronSyncHandler from './lib/routes/tron/sync.mjs';
+import heartbeatHandler from './lib/routes/console/heartbeat.mjs';
+import consoleStatusHandler from "./lib/routes/console/status.mjs";
+import transactionsHandler from './lib/routes/console/transactions.mjs';
+import paymentOrdersHandler from './lib/routes/console/payment-orders.mjs';
+import paymentQuoteHandler from './lib/routes/console/payment-quote-issuer.mjs';
+import paymentStatusHandler from './lib/routes/console/payment-status.mjs';
+import paymentOrderListHandler from './lib/routes/console/payment-order-list.mjs';
+import s2sTerminalAccessHandler from './lib/routes/console/s2s-terminal-access.mjs';
+import s2sTerminalAuditHandler from './lib/routes/console/s2s-terminal-audit.mjs';
+import s2sClientAdminHandler from './lib/routes/console/s2s-client-admin.mjs';
 
 const app = express();
 app.disable('x-powered-by');
