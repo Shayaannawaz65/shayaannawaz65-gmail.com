@@ -5,6 +5,7 @@ import { createHandler } from "../api/console/payment-quote-issuer.mjs";
 
 const NOW = 1_800_000_000_000;
 const terminalId = "OFFLINE-201.3-001";
+const keyId = "merchant-key-test-001";
 const invoiceReference = "INV-QUOTE-001";
 const amountUsdCents = 1250;
 const nonce = "abcdef0123456789abcdef0123456789";
@@ -74,21 +75,17 @@ function makeRequest(overrides = {}) {
   };
 
   const canonical = [
-    "T2T_PAYMENT_QUOTE_REQUEST_V1",
+    "T2T_S2S_PAYMENT_QUOTE_V1",
+    keyId,
     body.terminalId,
     body.timestamp,
     body.nonce,
     body.invoiceReference,
     body.amountUsdCents
   ].join("\n");
+  const signature = crypto.sign("sha256", Buffer.from(canonical, "utf8"), terminalKeys.privateKey).toString("base64");
 
-  body.signature = crypto.sign(
-    "sha256",
-    Buffer.from(canonical, "utf8"),
-    terminalKeys.privateKey
-  ).toString("base64");
-
-  return { method: "POST", body };
+  return { method: "POST", headers: { "x-t2t-key-id": keyId, "x-t2t-signature": signature }, body };
 }
 
 function mockPool({ duplicateNonce = false } = {}) {
