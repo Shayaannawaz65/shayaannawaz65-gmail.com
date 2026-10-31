@@ -9,7 +9,6 @@ import s2sTerminalAudit from "../lib/routes/console/s2s-terminal-audit.mjs";
 import consoleStatus from "../lib/routes/console/status.mjs";
 import transactions from "../lib/routes/console/transactions.mjs";
 import tronDbHealth from "../lib/routes/tron/db-health.mjs";
-import tronAddress from "../lib/routes/tron/address.mjs";
 import tronHealth from "../lib/routes/tron/health.mjs";
 import tronProviderHealth from "../lib/routes/tron/provider-health.mjs";
 import tronSync from "../lib/routes/tron/sync.mjs";
@@ -27,7 +26,6 @@ const routes = new Map([
   ["console/status", consoleStatus],
   ["console/transactions", transactions],
   ["tron/db-health", tronDbHealth],
-  ["tron/address", tronAddress],
   ["tron/health", tronHealth],
   ["tron/provider-health", tronProviderHealth],
   ["tron/sync", tronSync]
