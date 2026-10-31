@@ -269,11 +269,16 @@ export function createHandler({
         !Number.isSafeInteger(metadata.observedAt) ||
         quoteNow - metadata.observedAt > 30000 ||
         metadata.observedAt - quoteNow > 5000 ||
+        metadata.maxKrakenAgeMs !== 30000 ||
+        metadata.maxCoinGeckoAgeMs !== 120000 ||
+        metadata.maxFutureSkewMs !== 5000 ||
+        metadata.maxDivergenceBps !== 50 ||
         !Number.isSafeInteger(metadata.krakenTradeAt) ||
         !Number.isSafeInteger(metadata.coingeckoUpdatedAt) ||
-        [metadata.krakenTradeAt, metadata.coingeckoUpdatedAt].some(
-          time => quoteNow - time > 30000 || time - quoteNow > 5000
-        )
+        quoteNow - metadata.krakenTradeAt > metadata.maxKrakenAgeMs ||
+        quoteNow - metadata.coingeckoUpdatedAt > metadata.maxCoinGeckoAgeMs ||
+        metadata.krakenTradeAt - quoteNow > metadata.maxFutureSkewMs ||
+        metadata.coingeckoUpdatedAt - quoteNow > metadata.maxFutureSkewMs
       ) {
         throw new Error("Invalid or stale market-rate result");
       }
