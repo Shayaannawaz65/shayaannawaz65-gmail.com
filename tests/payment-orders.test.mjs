@@ -131,8 +131,6 @@ function mockPool({ trusted = true } = {}) {
                   rowCount: 1,
                   rows: [{
                     public_key_base64: publicKeyBase64,
-                    internal_mid: "mid-test",
-                    receiver_id: "receiver-test",
                     receiver_address: "TExAW9464LvbWmAsbcmNhvHQwawUn8rmN2"
                   }]
                 }
@@ -246,6 +244,8 @@ test("valid signed order inserts a pending order using mock database", async () 
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.status, "PENDING");
+  assert.equal("merchantId" in res.body, false);
+  assert.equal("receiverId" in res.body, false);
   assert.equal(res.body.currency, "USD");
   assert.equal(res.body.amountUsdCents, 1250);
   assert.equal(res.body.amountUsdtRaw, "12501250");
