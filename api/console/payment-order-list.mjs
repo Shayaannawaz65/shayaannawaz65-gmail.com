@@ -54,26 +54,20 @@ export function createHandler({
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const keyId = String(req.headers?.["x-t2t-key-id"] || "");
-    const timestamp = Number(req.headers?.["x-t2t-timestamp"]);
-    const nonce = String(req.headers?.["x-t2t-nonce"] || "");
-    const signatureB64 = String(req.headers?.["x-t2t-signature"] || "");
-    if (
-      !KEY_ID_RE.test(keyId) ||
-      !Number.isSafeInteger(timestamp) ||
-      Math.abs(now() - timestamp) > MAX_CLOCK_SKEW_MS ||
-      !NONCE_RE.test(nonce) ||
-      signatureB64.length < 40 || signatureB64.length > 1024
-    ) return res.status(401).json({ error: "Invalid S2S authentication" });
-
-    let signature;
-    try {
-      signature = Buffer.from(signatureB64, "base64");
-      if (signature.length < 32 || signature.toString("base64") !== signatureB64) {
-        return res.status(401).json({ error: "Invalid S2S authentication" });
-      }
-    } catch {
-      return res.status(401).json({ error: "Invalid S2S authentication" });
+    const expected = env.T2T_MERCHANT_DASHBOARD_TOKEN;
+    const supplied = String(req.headers?.authorization || "");
+    const token = supplied.startsWith("Bearer ") ? supplied.slice(7) : "";
+    if (typeof expected !== "string" || expected.length < 32) {
+      return res.status(503).json({ error: "Dashboard authentication is not configured" });
+    }
+    const a = Buffer.from(token);
+    const b = Buffer.from(expected);
+    if (!a.length || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const keyId = env.T2T_DASHBOARD_S2S_KEY_ID;
+    if (typeof keyId !== "string" || keyId.length < 8) {
+      return res.status(503).json({ error: "Dashboard merchant scope is not configured" });
     }
 
     const limitText = String(req.query?.limit ?? "25");
@@ -89,79 +83,22 @@ export function createHandler({
       });
     }
 
-    let client;
-    let inTransaction = false;
     try {
-      client = await poolProvider().connect();
-      await client.query("BEGIN");
-      const trusted = await client.query(
-        `SELECT public_key_base64
-           FROM public.t2t_s2s_client_keys
-          WHERE key_id = $1 AND status = 'ACTIVE'
-          FOR UPDATE`,
-        [keyId]
-      );
-      if (trusted.rowCount !== 1) {
-        await client.query("ROLLBACK");
-        inTransaction = false;
-        return res.status(401).json({ error: "S2S client not trusted" });
-      }
-
-      const canonical = [
-        "T2T_S2S_ORDER_LIST_V1",
-        keyId,
-        timestamp,
-        nonce,
-        limitText,
-        offsetText
-      ].join("\n");
-      let verified = false;
-      try {
-        const publicKey = crypto.createPublicKey({
-          key: Buffer.from(trusted.rows[0].public_key_base64, "base64"),
-          format: "der",
-          type: "spki"
-        });
-        verified = crypto.verify("sha256", Buffer.from(canonical), publicKey, signature);
-      } catch {}
-      if (!verified) {
-        await client.query("ROLLBACK");
-        inTransaction = false;
-        return res.status(401).json({ error: "Invalid S2S signature" });
-      }
-
-      await client.query(
-        `INSERT INTO public.t2t_s2s_request_nonces (key_id, nonce)
-         VALUES ($1, $2)`,
-        [keyId, nonce]
-      );
-      const result = await client.query(
-        `SELECT order_id,
-                terminal_id,
-                invoice_reference,
-                currency,
+      const result = await poolProvider().query(
+        `SELECT order_id, terminal_id, invoice_reference, currency,
                 amount_usd_cents::text AS amount_usd_cents,
-                amount_usdt_raw::text AS amount_usdt_raw,
-                receiver_address,
+                amount_usdt_raw::text AS amount_usdt_raw, receiver_address,
                 CASE WHEN status = 'PENDING' AND expires_at <= NOW()
                   THEN 'EXPIRED' ELSE status END AS status,
-                matched_transaction_id,
-                matched_event_index,
-                forwarding_status,
-                forwarding_transaction_id,
-                expires_at,
-                confirmed_at,
-                forwarded_at,
-                created_at,
-                updated_at
+                matched_transaction_id, matched_event_index,
+                forwarding_status, forwarding_transaction_id,
+                expires_at, confirmed_at, forwarded_at, created_at, updated_at
            FROM public.t2t_payment_orders
           WHERE s2s_key_id = $1
           ORDER BY created_at DESC, order_id DESC
           LIMIT $2 OFFSET $3`,
         [keyId, Number(limitText), Number(offsetText)]
       );
-      await client.query("COMMIT");
-      inTransaction = false;
       const records = result.rows.map(row => ({
         orderId: row.order_id,
         terminalId: row.terminal_id,
