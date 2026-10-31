@@ -132,50 +132,15 @@ export function createHandler({ poolProvider, env = process.env, now = () => Dat
     // Never expose DB connection details in the public dashboard response.
   }
 
-  let merchantBranch = {
-    status: "unavailable",
-    detail: "Merchant mapping table unavailable; verify migration"
+  const receiverAddress = env.T2T_TRON_RECEIVER_ADDRESS || "";
+  const receiverValid = typeof receiverAddress === "string" &&
+    normalizeTronAddress(receiverAddress) === receiverAddress;
+  const merchantBranch = {
+    status: receiverValid ? "configured" : "not_configured",
+    detail: receiverValid
+      ? "Central T2T TRON receiving wallet is configured; no merchant ID mapping is used"
+      : "Set T2T_TRON_RECEIVER_ADDRESS to the central T2T receiving wallet"
   };
-
-  try {
-    const mappingResult = await poolProvider().query(
-      `SELECT m.internal_mid, m.receiver_id, m.receiver_address,
-              m.status AS mapping_status, t.status AS terminal_status
-         FROM public.t2t_terminal_merchant_mapping m
-         JOIN public.t2t_trusted_terminals t
-           ON t.terminal_id = m.terminal_id
-        WHERE m.terminal_id = $1`,
-      ["OFFLINE-201.3-001"]
-    );
-
-    if (mappingResult.rowCount === 0) {
-      merchantBranch = {
-        status: "not_configured",
-        detail: "No merchant and receiver mapping exists for this terminal"
-      };
-    } else {
-      const m = mappingResult.rows[0];
-      const addressValid =
-        typeof m.receiver_address === "string" &&
-        normalizeTronAddress(m.receiver_address) === m.receiver_address;
-      const active = m.mapping_status === "ACTIVE" &&
-                     m.terminal_status === "ACTIVE" &&
-                     addressValid;
-
-      merchantBranch = {
-        status: m.mapping_status === "REVOKED" ? "revoked" :
-          !addressValid ? "invalid_address" :
-          active ? "configured" : "inactive",
-        detail: !addressValid
-          ? "Stored receiver address is invalid; mapping cannot be considered active"
-          : active
-            ? "Internal merchant and receiver mapping is active"
-            : "Mapping is not active; verify mapping and terminal status"
-      };
-    }
-  } catch {
-    // Do not expose database errors or connection details.
-  }
 
   return res.status(200).json({
     checked_at: new Date().toISOString(),
