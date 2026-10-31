@@ -97,7 +97,7 @@ export function createHandler({
            FROM public.t2t_payment_orders o
            LEFT JOIN public.t2t_usdt_forwarding_jobs fj ON fj.order_id = o.order_id
           WHERE o.s2s_key_id = $1
-          ORDER BY created_at DESC, order_id DESC
+          ORDER BY o.created_at DESC, o.order_id DESC
           LIMIT $2 OFFSET $3`,
         [keyId, Number(limitText), Number(offsetText)]
       );
