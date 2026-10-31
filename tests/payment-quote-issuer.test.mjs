@@ -103,7 +103,7 @@ function mockPool({ duplicateNonce = false } = {}) {
         };
       }
 
-      if (sql.includes("INSERT INTO public.t2t_heartbeat_nonces")) {
+      if (sql.includes("INSERT INTO public.t2t_s2s_request_nonces")) {
         if (duplicateNonce) {
           const error = new Error("duplicate nonce");
           error.code = "23505";
@@ -154,7 +154,7 @@ test("quote issuer fails closed when signing/rate configuration is missing", asy
   assert.equal(connected, false);
 });
 
-test("issues a signed quote for a trusted terminal", async () => {
+test("issues a signed quote for an authenticated S2S merchant", async () => {
   const db = mockPool();
   const { poolProvider, queries } = db;
   const res = response();
@@ -203,16 +203,16 @@ test("fails closed when market data cannot be validated", async () => {
   assert.ok(!queries.some(q => q.sql.includes("INSERT INTO public.t2t_heartbeat_nonces")));
 });
 
-test("rejects an invalid terminal signature before issuing a quote", async () => {
+test("rejects an invalid S2S signature before issuing a quote", async () => {
   const { poolProvider, queries } = mockPool();
   const req = makeRequest();
-  req.body.signature = crypto.randomBytes(64).toString("base64");
+  req.headers["x-t2t-signature"] = crypto.randomBytes(64).toString("base64");
   const res = response();
 
   await createHandler({ poolProvider, env, now: () => NOW, rateProvider: async () => marketRate })(req, res);
 
   assert.equal(res.statusCode, 401);
-  assert.equal(res.body.error, "Invalid terminal signature");
+  assert.equal(res.body.error, "Invalid S2S signature");
   assert.ok(!queries.some(q => q.sql === "BEGIN"));
   assert.ok(!queries.some(q => q.sql === "COMMIT"));
 });
