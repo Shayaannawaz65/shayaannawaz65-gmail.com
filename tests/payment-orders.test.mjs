@@ -121,7 +121,7 @@ function mockPool({ trusted = true } = {}) {
               : { rowCount: 0, rows: [] };
           }
 
-          if (sql.includes("INSERT INTO public.t2t_heartbeat_nonces")) {
+          if (sql.includes("INSERT INTO public.t2t_s2s_request_nonces")) {
             return { rowCount: 1, rows: [] };
           }
 
@@ -233,7 +233,7 @@ test("valid signed order inserts a pending order using mock database", async () 
     env,
     now: () => now,
     randomBytes: size => Buffer.alloc(size, 7)
-  })({ method: "POST", body: makeBody() }, res);
+  })({ method: "POST", headers: signedHeaders(makeBody()), body: makeBody() }, res);
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.status, "PENDING");
