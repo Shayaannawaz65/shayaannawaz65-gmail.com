@@ -222,6 +222,7 @@ export function createHandler({
       const inserted = await client.query(
         `INSERT INTO public.t2t_payment_orders (
            terminal_id,
+           s2s_key_id,
            invoice_reference,
            currency,
            amount_usd_cents,
@@ -237,17 +238,18 @@ export function createHandler({
            expires_at
          )
          VALUES (
-           $1, $2, 'USD', $3,
+           $1, $2, $3, 'USD', $4,
            'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-           $4, $5, $6,
-           $7, $8, $9, $10::jsonb, to_timestamp($11 / 1000.0),
-           NOW() + ($12 * INTERVAL '1 second')
+           $5, $6, $7,
+           $8, $9, $10, $11::jsonb, to_timestamp($12 / 1000.0),
+           NOW() + ($13 * INTERVAL '1 second')
          )
          RETURNING order_id, invoice_reference, amount_usd_cents,
                    amount_usdt_raw::text AS amount_usdt_raw,
                    receiver_address, expires_at, status`,
         [
           terminalId,
+          keyId,
           invoiceReference,
           amountUsdCents,
           amountUsdtRaw,
