@@ -11,6 +11,7 @@ import paymentOrderListHandler from './lib/routes/console/payment-order-list.mjs
 import s2sTerminalAccessHandler from './lib/routes/console/s2s-terminal-access.mjs';
 import s2sTerminalAuditHandler from './lib/routes/console/s2s-terminal-audit.mjs';
 import s2sClientAdminHandler from './lib/routes/console/s2s-client-admin.mjs';
+import apiRouteHandler from './api/[...route].mjs';
 
 const app = express();
 app.disable('x-powered-by');
@@ -32,6 +33,7 @@ app.get('/api/console/payment-order-list', paymentOrderListHandler);
 app.all('/api/console/s2s-terminal-access', s2sTerminalAccessHandler);
 app.get('/api/console/s2s-terminal-audit', s2sTerminalAuditHandler);
 app.all('/api/console/s2s-client-admin', s2sClientAdminHandler);
+app.all('/api/*splat', apiRouteHandler);
 
 app.get('/health', (_req, res) => {
   res.json({
