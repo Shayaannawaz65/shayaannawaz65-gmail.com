@@ -20,6 +20,7 @@ function makeResponse() {
 
 const now = 1_800_000_000_000;
 const terminalId = "OFFLINE-201.3-001";
+const keyId = "merchant-key-test-001";
 const nonce = "abcdef0123456789abcdef0123456789";
 
 const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", {
@@ -68,17 +69,6 @@ function makeBody(overrides = {}) {
     expiresInSeconds: 900
   };
 
-  const canonical = [
-    "T2T_PAYMENT_ORDER_V1",
-    fields.terminalId,
-    fields.timestamp,
-    fields.nonce,
-    fields.invoiceReference,
-    fields.amountUsdCents,
-    fields.amountUsdtRaw,
-    fields.expiresInSeconds
-  ].join("\n");
-
   const quoteId = "quote-test-id-00000001";
   const quoteExpiresAt = now + 30_000;
   const quoteCanonical = buildPaymentQuoteCanonical({
@@ -106,11 +96,6 @@ function makeBody(overrides = {}) {
         quoteKeys.privateKey
       ).toString("base64")
     },
-    signature: crypto.sign(
-      "sha256",
-      Buffer.from(canonical, "utf8"),
-      privateKey
-    ).toString("base64"),
     ...overrides
   };
 }
@@ -125,12 +110,12 @@ function mockPool({ trusted = true } = {}) {
         async query(sql, params = []) {
           state.queries.push({ sql, params });
 
-          if (sql.includes("SELECT t.public_key_base64")) {
+          if (sql.includes("SELECT t.terminal_id")) {
             return trusted
               ? {
                   rowCount: 1,
                   rows: [{
-                    public_key_base64: publicKeyBase64
+                    merchant_public_key_base64: publicKeyBase64
                   }]
                 }
               : { rowCount: 0, rows: [] };
@@ -171,6 +156,13 @@ const env = {
   T2T_EXCHANGE_QUOTE_PUBLIC_KEY: quotePublicKeyBase64
 };
 
+function signedHeaders(body, signatureOverride) {
+  const q = body.quote;
+  const metadataHash = crypto.createHash("sha256").update(JSON.stringify(q?.rateMetadata ?? null)).digest("hex");
+  const canonical = ["T2T_S2S_PAYMENT_ORDER_V1", keyId, body.terminalId, body.timestamp, body.nonce, body.invoiceReference, body.amountUsdCents, body.amountUsdtRaw, body.expiresInSeconds, String(q?.quoteId || ""), String(q?.rateNumerator || ""), String(q?.rateDenominator || ""), String(q?.expiresAt || ""), String(q?.signature || ""), metadataHash].join("\n");
+  return {"x-t2t-key-id":keyId,"x-t2t-signature":signatureOverride || crypto.sign("sha256",Buffer.from(canonical),privateKey).toString("base64")};
+}
+
 test("payment order endpoint only allows POST", async () => {
   const res = makeResponse();
   await createHandler({
@@ -194,7 +186,7 @@ test("rejects malformed order before database access", async () => {
     },
     env,
     now: () => now
-  })({ method: "POST", body: makeBody({ amountUsdCents: 0 }) }, res);
+  })({ method: "POST", headers: signedHeaders(makeBody({ amountUsdCents: 0 })), body: makeBody({ amountUsdCents: 0 }) }, res);
 
   assert.equal(res.statusCode, 400);
   assert.equal(connected, false);
@@ -208,7 +200,7 @@ test("rejects an untrusted terminal", async () => {
     poolProvider: () => pool,
     env,
     now: () => now
-  })({ method: "POST", body: makeBody() }, res);
+  })({ method: "POST", headers: signedHeaders(makeBody()), body: makeBody() }, res);
 
   assert.equal(res.statusCode, 401);
   assert.equal(pool.state.inserted, false);
@@ -224,7 +216,8 @@ test("rejects invalid signature without creating an order", async () => {
     now: () => now
   })({
     method: "POST",
-    body: makeBody({ signature: Buffer.alloc(64, 1).toString("base64") })
+    headers: signedHeaders(makeBody(), Buffer.alloc(64, 1).toString("base64")),
+    body: makeBody()
   }, res);
 
   assert.equal(res.statusCode, 401);
