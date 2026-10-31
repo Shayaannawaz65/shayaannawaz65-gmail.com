@@ -536,7 +536,6 @@ export function createHandler({
             const confirmationResult = await client.query(
               `UPDATE public.t2t_payment_orders
                SET status = 'CONFIRMED',
-                   forwarding_status = 'PENDING',
                    matched_transaction_id = $2,
                    matched_event_index = $3,
                    confirmed_at = NOW(),
@@ -558,16 +557,6 @@ export function createHandler({
               console.warn(
                 "Payment order match was not applied; leaving order unconfirmed",
                 { orderId: match.orderId, transactionId: item.txid, eventIndex: item.eventIndex }
-              );
-            } else {
-              await client.query(
-                `INSERT INTO public.t2t_usdt_forwarding_jobs (
-                   order_id, source_transaction_id, source_event_index,
-                   from_address, amount_usdt_raw, status
-                 )
-                 VALUES ($1, $2, $3, $4, $5::numeric, 'AWAITING_DESTINATION')
-                 ON CONFLICT (order_id) DO NOTHING`,
-                [match.orderId, item.txid, item.eventIndex, receiver, String(item.raw)]
               );
             }
           }
