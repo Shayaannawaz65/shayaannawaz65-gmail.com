@@ -1529,145 +1529,15 @@ test("duplicate confirmed transfer is not reinserted and updates last_seen_at", 
 
 const VALID_RECEIVER = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 
-function mockMappingClient(row) {
-  return {
-    async query(sql, params) {
-      assert.match(sql, /t2t_terminal_merchant_mapping/);
-      assert.match(sql, /t2t_trusted_terminals/);
-      assert.deepEqual(params, ["OFFLINE-201.3-001"]);
-      return { rows: row === undefined ? [] : [row] };
-    }
-  };
-}
-
-test("receiver resolver accepts an active mapping and active terminal", async () => {
-  const receiver = await resolveActiveReceiver(mockMappingClient({
-    receiver_address: VALID_RECEIVER,
-    mapping_status: "ACTIVE",
-    terminal_status: "ACTIVE"
-  }));
-  assert.equal(receiver, VALID_RECEIVER);
+test("receiver resolver uses configured central T2T wallet without merchant mapping", async () => {
+  assert.equal(await resolveActiveReceiver(null, {
+    T2T_TRON_RECEIVER_ADDRESS: VALID_RECEIVER
+  }), VALID_RECEIVER);
 });
 
-test("receiver resolver fails closed when mapping is missing", async () => {
-  assert.equal(await resolveActiveReceiver(mockMappingClient(undefined)), null);
-});
-
-test("receiver resolver rejects inactive or revoked mappings", async (t) => {
-  for (const status of ["INACTIVE", "REVOKED"]) {
-    await t.test(status, async () => {
-      assert.equal(await resolveActiveReceiver(mockMappingClient({
-        receiver_address: VALID_RECEIVER,
-        mapping_status: status,
-        terminal_status: "ACTIVE"
-      })), null);
-    });
-  }
-});
-
-test("receiver resolver rejects inactive or revoked terminals", async (t) => {
-  for (const status of ["INACTIVE", "REVOKED"]) {
-    await t.test(status, async () => {
-      assert.equal(await resolveActiveReceiver(mockMappingClient({
-        receiver_address: VALID_RECEIVER,
-        mapping_status: "ACTIVE",
-        terminal_status: status
-      })), null);
-    });
-  }
-});
-
-test("receiver resolver rejects malformed receiver addresses", async () => {
-  assert.equal(await resolveActiveReceiver(mockMappingClient({
-    receiver_address: "not-a-tron-address",
-    mapping_status: "ACTIVE",
-    terminal_status: "ACTIVE"
-  })), null);
-});
-
-test("receiver resolver propagates database errors for fail-closed handling", async () => {
-  const client = {
-    async query() {
-      throw new Error("simulated database failure");
-    }
-  };
-  await assert.rejects(
-    resolveActiveReceiver(client),
-    /simulated database failure/
-  );
-});
-
-test("receiver lookup database failure returns 502 without provider calls or deposit writes", async () => {
-  const saved = {
-    token: process.env.T2T_TRON_SYNC_TOKEN,
-    apiKey: process.env.TRONGRID_API_KEY
-  };
-
-  process.env.T2T_TRON_SYNC_TOKEN = "test-only-secret";
-  process.env.TRONGRID_API_KEY = "test-only-api-key";
-
-  let statusCode;
-  let responseBody;
-  let fetchCalls = 0;
-  let depositWrites = 0;
-  let releaseCalls = 0;
-
-  const client = {
-    async query(sql) {
-      if (sql.includes("t2t_terminal_merchant_mapping")) {
-        throw new Error("simulated receiver lookup database failure");
-      }
-      if (sql.includes("INSERT INTO public.tron_usdt_deposits")) {
-        depositWrites++;
-      }
-      return { rowCount: 1, rows: [] };
-    },
-    release() {
-      releaseCalls++;
-    }
-  };
-
-  const testHandler = createHandler({
-    jwtFactory: () => "test-only-jwt",
-    poolProvider: () => ({ connect: async () => client }),
-    fetchImpl: async () => {
-      fetchCalls++;
-      throw new Error("Provider fetch must not run");
-    }
-  });
-
-  const res = {
-    setHeader() {},
-    status(code) {
-      statusCode = code;
-      return this;
-    },
-    json(body) {
-      responseBody = body;
-      return this;
-    }
-  };
-
-  try {
-    await testHandler({
-      method: "POST",
-      headers: { authorization: "Bearer test-only-secret" }
-    }, res);
-
-    assert.equal(statusCode, 502);
-    assert.deepEqual(responseBody, {
-      error: "Sync failed; check server logs"
-    });
-    assert.equal(fetchCalls, 0);
-    assert.equal(depositWrites, 0);
-    assert.equal(releaseCalls, 1);
-  } finally {
-    for (const [key, value] of Object.entries({
-      T2T_TRON_SYNC_TOKEN: saved.token,
-      TRONGRID_API_KEY: saved.apiKey
-    })) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
+test("receiver resolver fails closed when central receiver is missing or malformed", async () => {
+  assert.equal(await resolveActiveReceiver(null, {}), null);
+  assert.equal(await resolveActiveReceiver(null, {
+    T2T_TRON_RECEIVER_ADDRESS: "not-a-tron-address"
+  }), null);
 });
