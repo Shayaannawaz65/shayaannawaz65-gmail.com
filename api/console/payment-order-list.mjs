@@ -85,15 +85,15 @@ export function createHandler({
 
     try {
       const result = await poolProvider().query(
-        `SELECT order_id, terminal_id, invoice_reference, currency,
-                amount_usd_cents::text AS amount_usd_cents,
-                amount_usdt_raw::text AS amount_usdt_raw, receiver_address,
-                CASE WHEN status = 'PENDING' AND expires_at <= NOW()
-                  THEN 'EXPIRED' ELSE status END AS status,
-                matched_transaction_id, matched_event_index,
+        `SELECT o.order_id, o.terminal_id, o.invoice_reference, o.currency,
+                o.amount_usd_cents::text AS amount_usd_cents,
+                o.amount_usdt_raw::text AS amount_usdt_raw, o.receiver_address,
+                CASE WHEN o.status = 'PENDING' AND o.expires_at <= NOW()
+                  THEN 'EXPIRED' ELSE o.status END AS status,
+                o.matched_transaction_id, o.matched_event_index,
                 COALESCE(fj.status, o.forwarding_status) AS forwarding_status,
                 COALESCE(fj.forwarding_transaction_id, o.forwarding_transaction_id) AS forwarding_transaction_id,
-                expires_at, confirmed_at, forwarded_at, created_at, updated_at
+                o.expires_at, o.confirmed_at, o.forwarded_at, o.created_at, o.updated_at
            FROM public.t2t_payment_orders o
            LEFT JOIN public.t2t_usdt_forwarding_jobs fj ON fj.order_id = o.order_id
           WHERE o.s2s_key_id = $1
