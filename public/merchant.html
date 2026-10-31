@@ -134,7 +134,6 @@ code{overflow-wrap:anywhere}
           code.textContent = order.transactionId;
           tx.replaceChildren(code);
         }
-        cell(tr, `${order.forwardingStatus || "NOT_STARTED"}\n${order.forwardingTransactionId || ""}`);
         body.appendChild(tr);
       }
 
