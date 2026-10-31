@@ -144,7 +144,7 @@ export function createHandler({ env = process.env, poolProvider = getPool } = {}
       const { clientId, clientType, displayName, keyId, publicKeyBase64 } = body;
       if (
         typeof clientId !== "string" || !ID_RE.test(clientId) ||
-        !["BANK", "MERCHANT", "POS", "T2T_INTERNAL"].includes(clientType) ||
+        !["MERCHANT", "POS"].includes(clientType) ||
         typeof displayName !== "string" ||
         displayName !== displayName.trim() ||
         displayName.length < 1 || displayName.length > 160 ||
