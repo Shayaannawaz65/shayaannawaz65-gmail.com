@@ -174,10 +174,12 @@ export function createHandler({
       // connection before making any external market-data requests.
       client = await poolProvider().connect();
       const initial = await client.query(
-        `SELECT public_key_base64
-           FROM public.t2t_s2s_client_keys
-          WHERE key_id = $1 AND status = 'ACTIVE'`,
-        [keyId]
+        `SELECT mk.public_key_base64
+           FROM public.t2t_s2s_client_keys mk
+           JOIN public.t2t_trusted_terminals t
+             ON t.terminal_id = $2 AND t.status = 'ACTIVE'
+          WHERE mk.key_id = $1 AND mk.status = 'ACTIVE'`,
+        [keyId, terminalId]
       );
       if (initial.rowCount !== 1) {
         return res.status(401).json({ error: "S2S client not trusted" });
@@ -255,11 +257,13 @@ export function createHandler({
       await client.query("BEGIN");
       inTransaction = true;
       const trusted = await client.query(
-        `SELECT public_key_base64
-           FROM public.t2t_s2s_client_keys
-          WHERE key_id = $1 AND status = 'ACTIVE'
-          FOR UPDATE`,
-        [keyId]
+        `SELECT mk.public_key_base64
+           FROM public.t2t_s2s_client_keys mk
+           JOIN public.t2t_trusted_terminals t
+             ON t.terminal_id = $2 AND t.status = 'ACTIVE'
+          WHERE mk.key_id = $1 AND mk.status = 'ACTIVE'
+          FOR UPDATE OF mk, t`,
+        [keyId, terminalId]
       );
       if (
         trusted.rowCount !== 1 ||
