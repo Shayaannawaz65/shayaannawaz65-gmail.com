@@ -32,19 +32,10 @@ function getPool() {
   return pool;
 }
 
-function tokenMatches(req, expected) {
-  const header = req.headers?.authorization;
-  if (typeof header !== "string" || !header.startsWith("Bearer ")) {
-    return false;
-  }
+const KEY_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
+const NONCE_RE = /^[a-f0-9]{32,64}$/i;
+const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
 
-  const supplied = Buffer.from(header.slice(7), "utf8");
-  const configured = Buffer.from(expected, "utf8");
-
-  return supplied.length > 0 &&
-    supplied.length === configured.length &&
-    crypto.timingSafeEqual(supplied, configured);
-}
 
 function iso(value) {
   return value == null ? null : new Date(value).toISOString();
@@ -52,7 +43,8 @@ function iso(value) {
 
 export function createHandler({
   env = process.env,
-  poolProvider = getPool
+  poolProvider = getPool,
+  now = () => Date.now()
 } = {}) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "no-store");
@@ -62,15 +54,26 @@ export function createHandler({
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const expected = env.T2T_MERCHANT_DASHBOARD_TOKEN;
-    if (typeof expected !== "string" || expected.length < 32) {
-      return res.status(503).json({
-        error: "Merchant dashboard authentication is not configured"
-      });
-    }
+    const keyId = String(req.headers?.["x-t2t-key-id"] || "");
+    const timestamp = Number(req.headers?.["x-t2t-timestamp"]);
+    const nonce = String(req.headers?.["x-t2t-nonce"] || "");
+    const signatureB64 = String(req.headers?.["x-t2t-signature"] || "");
+    if (
+      !KEY_ID_RE.test(keyId) ||
+      !Number.isSafeInteger(timestamp) ||
+      Math.abs(now() - timestamp) > MAX_CLOCK_SKEW_MS ||
+      !NONCE_RE.test(nonce) ||
+      signatureB64.length < 40 || signatureB64.length > 1024
+    ) return res.status(401).json({ error: "Invalid S2S authentication" });
 
-    if (!tokenMatches(req, expected)) {
-      return res.status(401).json({ error: "Unauthorized" });
+    let signature;
+    try {
+      signature = Buffer.from(signatureB64, "base64");
+      if (signature.length < 32 || signature.toString("base64") !== signatureB64) {
+        return res.status(401).json({ error: "Invalid S2S authentication" });
+      }
+    } catch {
+      return res.status(401).json({ error: "Invalid S2S authentication" });
     }
 
     const limitText = String(req.query?.limit ?? "25");
@@ -86,9 +89,53 @@ export function createHandler({
       });
     }
 
+    let client;
+    let inTransaction = false;
     try {
-      const db = poolProvider();
-      const result = await db.query(
+      client = await poolProvider().connect();
+      await client.query("BEGIN");
+      const trusted = await client.query(
+        `SELECT public_key_base64
+           FROM public.t2t_s2s_client_keys
+          WHERE key_id = $1 AND status = 'ACTIVE'
+          FOR UPDATE`,
+        [keyId]
+      );
+      if (trusted.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        inTransaction = false;
+        return res.status(401).json({ error: "S2S client not trusted" });
+      }
+
+      const canonical = [
+        "T2T_S2S_ORDER_LIST_V1",
+        keyId,
+        timestamp,
+        nonce,
+        limitText,
+        offsetText
+      ].join("\n");
+      let verified = false;
+      try {
+        const publicKey = crypto.createPublicKey({
+          key: Buffer.from(trusted.rows[0].public_key_base64, "base64"),
+          format: "der",
+          type: "spki"
+        });
+        verified = crypto.verify("sha256", Buffer.from(canonical), publicKey, signature);
+      } catch {}
+      if (!verified) {
+        await client.query("ROLLBACK");
+        inTransaction = false;
+        return res.status(401).json({ error: "Invalid S2S signature" });
+      }
+
+      await client.query(
+        `INSERT INTO public.t2t_s2s_request_nonces (key_id, nonce)
+         VALUES ($1, $2)`,
+        [keyId, nonce]
+      );
+      const result = await client.query(
         `SELECT order_id,
                 terminal_id,
                 invoice_reference,
@@ -96,11 +143,8 @@ export function createHandler({
                 amount_usd_cents::text AS amount_usd_cents,
                 amount_usdt_raw::text AS amount_usdt_raw,
                 receiver_address,
-                CASE
-                  WHEN status = 'PENDING' AND expires_at <= NOW()
-                    THEN 'EXPIRED'
-                  ELSE status
-                END AS status,
+                CASE WHEN status = 'PENDING' AND expires_at <= NOW()
+                  THEN 'EXPIRED' ELSE status END AS status,
                 matched_transaction_id,
                 matched_event_index,
                 forwarding_status,
@@ -111,11 +155,13 @@ export function createHandler({
                 created_at,
                 updated_at
            FROM public.t2t_payment_orders
+          WHERE s2s_key_id = $1
           ORDER BY created_at DESC, order_id DESC
-          LIMIT $1 OFFSET $2`,
-        [Number(limitText), Number(offsetText)]
+          LIMIT $2 OFFSET $3`,
+        [keyId, Number(limitText), Number(offsetText)]
       );
-
+      await client.query("COMMIT");
+      inTransaction = false;
       const records = result.rows.map(row => ({
         orderId: row.order_id,
         terminalId: row.terminal_id,
@@ -152,10 +198,12 @@ export function createHandler({
           fundsForwarded: false
         }
       });
-    } catch {
-      return res.status(503).json({
-        error: "Payment order list unavailable"
-      });
+    } catch (error) {
+      if (client && inTransaction) { try { await client.query("ROLLBACK"); } catch {} }
+      if (error?.code === "23505") return res.status(409).json({ error: "S2S request replay rejected" });
+      return res.status(503).json({ error: "Payment order list unavailable" });
+    } finally {
+      client?.release();
     }
   };
 }
