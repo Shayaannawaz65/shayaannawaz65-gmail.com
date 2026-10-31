@@ -59,7 +59,7 @@ test("unauthorized dashboard request never queries database", async () => {
 test("invalid pagination is rejected", async () => {
   const res = response();
   await createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token }
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId }
   })(request({
     authorization: `Bearer ${token}`,
     query: { limit: "101", offset: "-1" }
@@ -73,7 +73,7 @@ test("authorized listing returns safe fields and parameterized pagination", asyn
   const res = response();
 
   const handler = createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token },
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId },
     poolProvider: () => ({
       query: async (statement, values) => {
         sql = statement;
@@ -126,7 +126,7 @@ test("authorized listing returns safe fields and parameterized pagination", asyn
 test("database failure returns generic error", async () => {
   const res = response();
   await createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token },
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId },
     poolProvider: () => ({ query: async () => { throw new Error("private DB detail"); } })
   })(request({ authorization: `Bearer ${token}` }), res);
   assert.equal(res.statusCode, 503);
