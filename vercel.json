@@ -3,6 +3,10 @@
     {
       "source": "/api/console/payment-quote",
       "destination": "/api/console/payment-quote-issuer"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/[...route]?route=:path*"
     }
   ]
 }
