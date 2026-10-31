@@ -70,10 +70,17 @@ The internal dashboard uses:
 
 The API filters every order-list query by `s2s_key_id`; it does not return other S2S clients' orders. Configure a separate dashboard token and key scope per deployment. Do not put the merchant signing private key in the browser.
 
-## Central receiver
+## Final receiving address
 
-Set `T2T_TRON_RECEIVER_ADDRESS` to the central T2T TRON address. Both order creation and the direct confirmed-event scanner use this address. No internal MID or per-terminal merchant receiver mapping is used.
+Set `T2T_TRON_RECEIVER_ADDRESS` to the confirmed Binance USDT TRC20 deposit address. Both payment-order creation and the confirmed-event scanner use this same address. Customers pay directly to Binance; T2T verifies the transfer and records the result. There is no intermediate T2T wallet and no forwarding transaction.
+
+Never hardcode the deposit address in source code. Configure it as a protected deployment environment variable and verify the network is TRON (TRC20) before enabling payment links.
+
+## Payment channels
+
+- **S2S:** an authenticated merchant server creates a USD invoice through the signed S2S API.
+- **IP-to-IP POS:** a trusted POS device initiates a payment request directly to another trusted POS device over the T2T device transport. The device exchange must preserve authenticated device identity, request signatures, replay protection and the same server-issued USD-to-USDT quote. This cloud S2S API alone does not implement the POS-to-POS transport.
 
 ## Important current boundary
 
-The scanner records and matches confirmed USDT transfers and creates one idempotent forwarding job per uniquely matched payment. Jobs remain `AWAITING_DESTINATION` until the final wallet is configured. No transaction is signed or broadcast by this branch. Do not treat `CONFIRMED` as `FORWARDED`; actual signing, fee handling, confirmation monitoring, reconciliation and explicit live-fund approval remain required.
+The scanner records and matches confirmed USDT transfers idempotently. It does not create forwarding jobs, sign transactions or broadcast funds. A payment is marked `CONFIRMED` only after the confirmed on-chain transfer matches its invoice.
