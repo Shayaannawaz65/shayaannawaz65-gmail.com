@@ -131,10 +131,10 @@ function mockPool({ trusted = true } = {}) {
               rowCount: 1,
               rows: [{
                 order_id: "00000000-0000-4000-8000-000000000001",
-                invoice_reference: params[1],
-                amount_usd_cents: params[2],
-                amount_usdt_raw: params[3],
-                receiver_address: params[4],
+                invoice_reference: params[2],
+                amount_usd_cents: params[3],
+                amount_usdt_raw: params[4],
+                receiver_address: params[5],
                 expires_at: new Date(now + 900000),
                 status: "PENDING"
               }]
@@ -250,7 +250,8 @@ test("valid signed order inserts a pending order using mock database", async () 
     q.sql.includes("INSERT INTO public.t2t_payment_orders")
   );
   assert.ok(insert);
-  assert.equal(insert.params[5].length, 64);
+  assert.equal(insert.params[6].length, 64);
+  assert.equal(insert.params[1], keyId);
   assert.equal(insert.params[5].includes("070707"), false);
-  assert.deepEqual(JSON.parse(insert.params[9]), quoteMetadata);
+  assert.deepEqual(JSON.parse(insert.params[10]), quoteMetadata);
 });
