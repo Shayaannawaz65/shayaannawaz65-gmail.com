@@ -148,15 +148,11 @@ export function createHandler({
       inTransaction = true;
 
       const trusted = await client.query(
-        `SELECT t.public_key_base64,
-                m.receiver_address
+        `SELECT t.public_key_base64
            FROM public.t2t_trusted_terminals t
-           JOIN public.t2t_terminal_merchant_mapping m
-             ON m.terminal_id = t.terminal_id
           WHERE t.terminal_id = $1
             AND t.status = 'ACTIVE'
-            AND m.status = 'ACTIVE'
-          FOR UPDATE OF t, m`,
+          FOR UPDATE OF t`,
         [terminalId]
       );
 
@@ -189,7 +185,7 @@ export function createHandler({
         return res.status(401).json({ error: "Invalid terminal signature" });
       }
 
-      const receiverAddress = trusted.rows[0].receiver_address;
+      const receiverAddress = env.T2T_TRON_RECEIVER_ADDRESS || "";
       if (
         typeof receiverAddress !== "string" ||
         normalizeTronAddress(receiverAddress) !== receiverAddress
