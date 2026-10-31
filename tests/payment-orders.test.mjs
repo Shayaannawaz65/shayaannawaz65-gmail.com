@@ -130,8 +130,7 @@ function mockPool({ trusted = true } = {}) {
               ? {
                   rowCount: 1,
                   rows: [{
-                    public_key_base64: publicKeyBase64,
-                    receiver_address: "TExAW9464LvbWmAsbcmNhvHQwawUn8rmN2"
+                    public_key_base64: publicKeyBase64
                   }]
                 }
               : { rowCount: 0, rows: [] };
@@ -168,6 +167,7 @@ function mockPool({ trusted = true } = {}) {
 
 const env = {
   T2T_PAYMENT_BASE_URL: "https://payments.example.test",
+  T2T_TRON_RECEIVER_ADDRESS: "TExAW9464LvbWmAsbcmNhvHQwawUn8rmN2",
   T2T_EXCHANGE_QUOTE_PUBLIC_KEY: quotePublicKeyBase64
 };
 
