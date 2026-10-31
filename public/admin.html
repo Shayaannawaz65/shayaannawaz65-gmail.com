@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<title>T2T S2S Access Administration</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#e8eef7;background:#0b1220}
+*{box-sizing:border-box}
+body{margin:0;padding:24px;max-width:1180px;margin-inline:auto}
+h1{margin-bottom:5px}.muted{color:#9aabc2}
+.panel{background:#111d2f;border:1px solid #283a52;border-radius:13px;padding:18px;margin:16px 0}
+input,button,select,textarea{font:inherit;padding:11px;border-radius:8px;margin:5px 4px 5px 0}
+select,textarea{display:block;background:#0b1220;color:white;border:1px solid #405570;max-width:100%;width:min(680px,100%)}
+textarea{font-family:ui-monospace,monospace;font-size:13px;overflow-wrap:anywhere}
+input{background:#0b1220;color:white;border:1px solid #405570;max-width:100%;width:min(440px,100%)}
+button{border:0;background:#c6f36b;color:#17210b;font-weight:700;cursor:pointer}
+button.secondary{background:#344255;color:white}
+button.danger{background:#8c343d;color:white}
+button:disabled{opacity:.5;cursor:not-allowed}
+label{display:block;margin-top:12px}
+#message{white-space:pre-wrap;overflow-wrap:anywhere}
+.error{color:#ff9d9d}.good{color:#c6f36b}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:720px}
+th,td{text-align:left;padding:10px;border-bottom:1px solid #344255;vertical-align:top}
+th{color:#c6f36b}
+code{overflow-wrap:anywhere}
+nav a{color:#c6f36b;margin-right:16px}
+.notice{border:1px solid #67532c;background:#2b251a;color:#e8d9b5;padding:12px;border-radius:9px}
+</style>
+</head>
+<body>
+<nav><a href="/">Operations console</a><a href="/merchant.html">Merchant dashboard</a></nav>
+<h1>T2T S2S Access Administration</h1>
+<p class="muted">Provision BANK, MERCHANT and POS S2S clients, manage P-256 signing keys, and administer POS terminal access.</p>
+
+<section class="panel">
+  <h2>Administrator authentication</h2>
+  <form id="login">
+    <label for="token">S2S authorization admin token</label>
+    <input id="token" type="password" autocomplete="current-password"
+      minlength="32" required placeholder="Enter admin token">
+    <button type="submit">Connect</button>
+    <button type="button" class="secondary" id="disconnect">Disconnect</button>
+  </form>
+  <p id="message" role="status">Not connected.</p>
+</section>
+
+<section class="panel">
+  <h2>Register S2S client and first signing key</h2>
+  <p class="muted">The client identity and its first active P-256 public key are created atomically.</p>
+  <label for="clientId">Client ID</label>
+  <input id="clientId" maxlength="128" autocomplete="off" placeholder="bank-primary or merchant-acme">
+  <label for="clientType">Client type</label>
+  <select id="clientType">
+    <option value="BANK">BANK</option>
+    <option value="MERCHANT">MERCHANT</option>
+    <option value="POS">POS</option>
+  </select>
+  <label for="displayName">Display name</label>
+  <input id="displayName" maxlength="160" autocomplete="off" placeholder="Bank / merchant name">
+  <label for="newKeyId">First key ID</label>
+  <input id="newKeyId" maxlength="128" autocomplete="off" placeholder="bank-primary-key-01">
+  <label for="newPublicKey">P-256 public key (Base64 DER/SPKI)</label>
+  <textarea id="newPublicKey" rows="4" spellcheck="false" autocomplete="off"
+    placeholder="Base64 encoded public key only; never paste a private key"></textarea>
+  <button id="createClient" type="button">Create client and register key</button>
+</section>
+
+<section class="panel">
+  <h2>Manage signing keys and clients</h2>
+  <label for="extraClientId">Existing client ID (for additional key)</label>
+  <input id="extraClientId" maxlength="128" autocomplete="off">
+  <label for="extraKeyId">New key ID</label>
+  <input id="extraKeyId" maxlength="128" autocomplete="off">
+  <label for="extraPublicKey">New P-256 public key (Base64 DER/SPKI)</label>
+  <textarea id="extraPublicKey" rows="4" spellcheck="false" autocomplete="off"></textarea>
+  <button id="registerKey" type="button">Register additional key</button>
+  <hr>
+  <label for="revokeClientId">Client ID to revoke (also revokes all active keys)</label>
+  <input id="revokeClientId" maxlength="128" autocomplete="off">
+  <button id="revokeClient" type="button" class="danger">Revoke client</button>
+  <label for="revokeKeyId">Key ID to revoke only</label>
+  <input id="revokeKeyId" maxlength="128" autocomplete="off">
+  <button id="revokeKey" type="button" class="danger">Revoke key</button>
+</section>
+
+<section class="panel">
+  <h2>Client and key audit history</h2>
+  <button id="refreshClientAudit" type="button">Refresh client audit</button>
+  <button id="olderClientAudit" type="button" class="secondary">Older records</button>
+  <span id="clientAuditPage" class="muted"></span>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Time</th><th>Action</th><th>Client</th><th>Key</th><th>Actor</th><th>Audit ID</th></tr></thead>
+      <tbody id="clientAudit"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Terminal authorization</h2>
+  <p class="muted">Grant requires both the S2S key and terminal to be ACTIVE. Revoke remains available if either parent is inactive.</p>
+  <label for="keyId">S2S key ID</label>
+  <input id="keyId" maxlength="128" autocomplete="off" placeholder="Registered S2S key ID">
+  <label for="terminalId">Trusted terminal ID</label>
+  <input id="terminalId" maxlength="100" autocomplete="off" placeholder="Registered terminal ID">
+  <div>
+    <button id="grant" type="button">Grant access</button>
+    <button id="revoke" type="button" class="danger">Revoke access</button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Access audit history</h2>
+  <button id="refresh" type="button">Refresh audit</button>
+  <button id="older" type="button" class="secondary">Older records</button>
+  <span id="page" class="muted"></span>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Time</th><th>Action</th><th>S2S key</th><th>Terminal</th><th>Actor label</th><th>Audit ID</th></tr></thead>
+      <tbody id="audit"></tbody>
+    </table>
+  </div>
+</section>
+
+<p class="notice">
+  Security limitation: this page uses a shared admin bearer token and a server-configured actor label.
+  It does not provide individual human administrator accounts or prove which person performed an action.
+  The token is held in page memory only and is not saved in browser storage.
+  This page cannot approve payments, move funds or initiate blockchain sync.
+</p>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  let token = "";
+  let offset = 0;
+  const limit = 50;
+  let busy = false;
+
+  function message(value, error = false) {
+    $("message").textContent = value;
+    $("message").className = error ? "error" : "good";
+  }
+
+  function authHeaders() {
+    return { Authorization: `Bearer ${token}`, Accept: "application/json" };
+  }
+
+  function date(value) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+  }
+
+  function addCell(row, value) {
+    const td = document.createElement("td");
+    td.textContent = value == null || value === "" ? "—" : String(value);
+    row.appendChild(td);
+  }
+
+  async function request(url, options = {}) {
+    const response = await fetch(url, {
+      ...options,
+      headers: { ...authHeaders(), ...(options.headers || {}) },
+      cache: "no-store",
+      credentials: "same-origin"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401) disconnect();
+      throw new Error(data.error || `Request failed (${response.status})`);
+    }
+    return data;
+  }
+
+  function disconnect() {
+    token = "";
+    $("token").value = "";
+    $("audit").replaceChildren();
+    $("clientAudit").replaceChildren();
+    $("page").textContent = "";
+    $("clientAuditPage").textContent = "";
+    message("Disconnected. Token cleared from page memory.");
+  }
+
+  async function audit() {
+    if (!token || busy) return;
+    busy = true;
+    $("refresh").disabled = true;
+    try {
+      const data = await request(
+        `/api/console/s2s-terminal-audit?limit=${limit}&offset=${offset}`
+      );
+      const body = $("audit");
+      body.replaceChildren();
+      for (const item of data.records || []) {
+        const tr = document.createElement("tr");
+        addCell(tr, date(item.createdAt));
+        addCell(tr, item.action);
+        addCell(tr, item.keyId);
+        addCell(tr, item.terminalId);
+        addCell(tr, item.actorId);
+        addCell(tr, item.auditId);
+        body.appendChild(tr);
+      }
+      $("page").textContent =
+        `Showing ${data.pagination.returned} · offset ${offset}`;
+      message(`Loaded ${data.pagination.returned} audit record(s).`);
+    } catch (error) {
+      message(error.message || "Audit request failed.", true);
+    } finally {
+      busy = false;
+      $("refresh").disabled = false;
+    }
+  }
+
+  let clientAuditOffset = 0;
+
+  async function clientAudit() {
+    if (!token || busy) return;
+    busy = true;
+    $("refreshClientAudit").disabled = true;
+    try {
+      const data = await request(
+        `/api/console/s2s-client-admin?limit=${limit}&offset=${clientAuditOffset}`
+      );
+      const body = $("clientAudit");
+      body.replaceChildren();
+      for (const item of data.records || []) {
+        const tr = document.createElement("tr");
+        addCell(tr, date(item.createdAt));
+        addCell(tr, item.action);
+        addCell(tr, item.clientId);
+        addCell(tr, item.keyId);
+        addCell(tr, item.actorId);
+        addCell(tr, item.auditId);
+        body.appendChild(tr);
+      }
+      $("clientAuditPage").textContent =
+        `Showing ${data.pagination.returned} · offset ${clientAuditOffset}`;
+      message(`Loaded ${data.pagination.returned} client/key audit record(s).`);
+    } catch (error) {
+      message(error.message || "Client audit request failed.", true);
+    } finally {
+      busy = false;
+      $("refreshClientAudit").disabled = false;
+    }
+  }
+
+  async function clientAction(payload, confirmation) {
+    if (!token || busy) {
+      message("Connect first using the admin token.", true);
+      return;
+    }
+    if (confirmation && !window.confirm(confirmation)) return;
+    busy = true;
+    for (const id of ["createClient", "registerKey", "revokeClient", "revokeKey"]) {
+      $(id).disabled = true;
+    }
+    try {
+      const data = await request("/api/console/s2s-client-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      message(`${payload.action.toUpperCase()} completed. Check audit history.`);
+      clientAuditOffset = 0;
+      busy = false;
+      await clientAudit();
+    } catch (error) {
+      message(error.message || "Client administration failed.", true);
+    } finally {
+      busy = false;
+      for (const id of ["createClient", "registerKey", "revokeClient", "revokeKey"]) {
+        $(id).disabled = false;
+      }
+    }
+  }
+
+  function publicKeyInput(id) {
+    return $(id).value.replace(/\\s+/g, "");
+  }
+
+  $("createClient").addEventListener("click", () => {
+    const payload = {
+      action: "create_client",
+      clientId: $("clientId").value.trim(),
+      clientType: $("clientType").value,
+      displayName: $("displayName").value.trim(),
+      keyId: $("newKeyId").value.trim(),
+      publicKeyBase64: publicKeyInput("newPublicKey")
+    };
+    clientAction(payload, `Create ${payload.clientType} client ${payload.clientId} and activate key ${payload.keyId}?`);
+  });
+
+  $("registerKey").addEventListener("click", () => {
+    clientAction({
+      action: "register_key",
+      clientId: $("extraClientId").value.trim(),
+      keyId: $("extraKeyId").value.trim(),
+      publicKeyBase64: publicKeyInput("extraPublicKey")
+    }, `Register new signing key ${$("extraKeyId").value.trim()} for ${$("extraClientId").value.trim()}?`);
+  });
+
+  $("revokeClient").addEventListener("click", () => {
+    const clientId = $("revokeClientId").value.trim();
+    clientAction({ action: "revoke_client", clientId },
+      `Revoke client ${clientId} and all of its active signing keys?`);
+  });
+
+  $("revokeKey").addEventListener("click", () => {
+    const keyId = $("revokeKeyId").value.trim();
+    clientAction({ action: "revoke_key", keyId }, `Revoke signing key ${keyId}?`);
+  });
+
+  $("refreshClientAudit").addEventListener("click", () => {
+    clientAuditOffset = 0;
+    clientAudit();
+  });
+  $("olderClientAudit").addEventListener("click", () => {
+    clientAuditOffset += limit;
+    clientAudit();
+  });
+
+  async function changeAccess(action) {
+    if (!token || busy) {
+      message("Connect first using the admin token.", true);
+      return;
+    }
+    const keyId = $("keyId").value.trim();
+    const terminalId = $("terminalId").value.trim();
+    if (!/^[A-Za-z0-9._-]{8,128}$/.test(keyId) ||
+        !/^[A-Za-z0-9._-]{1,100}$/.test(terminalId)) {
+      message("Enter a valid S2S key ID and terminal ID.", true);
+      return;
+    }
+    if (action === "revoke" &&
+        !window.confirm(`Revoke access for ${keyId} on ${terminalId}?`)) return;
+
+    busy = true;
+    $("grant").disabled = true;
+    $("revoke").disabled = true;
+    try {
+      const data = await request("/api/console/s2s-terminal-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, keyId, terminalId })
+      });
+      message(`${action.toUpperCase()} completed. State changed: ${data.changed}.`);
+      offset = 0;
+      busy = false;
+      await audit();
+    } catch (error) {
+      message(error.message || "Authorization operation failed.", true);
+    } finally {
+      busy = false;
+      $("grant").disabled = false;
+      $("revoke").disabled = false;
+    }
+  }
+
+  $("login").addEventListener("submit", async event => {
+    event.preventDefault();
+    token = $("token").value;
+    offset = 0;
+    await audit();
+    await clientAudit();
+  });
+  $("disconnect").addEventListener("click", disconnect);
+  $("grant").addEventListener("click", () => changeAccess("grant"));
+  $("revoke").addEventListener("click", () => changeAccess("revoke"));
+  $("refresh").addEventListener("click", () => { offset = 0; audit(); });
+  $("older").addEventListener("click", () => { offset += limit; audit(); });
+})();
+</script>
+</body>
+</html>

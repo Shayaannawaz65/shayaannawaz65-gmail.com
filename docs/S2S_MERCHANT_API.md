@@ -70,6 +70,18 @@ The internal dashboard uses:
 
 The API filters every order-list query by `s2s_key_id`; it does not return other S2S clients' orders. Configure a separate dashboard token and key scope per deployment. Do not put the merchant signing private key in the browser.
 
+## Database connection configuration
+
+`T2T_DATABASE_URL` is the preferred PostgreSQL connection variable. When set,
+all application database handlers use it before the standard Vercel/Neon
+fallback variables (`DATABASE_URL_UNPOOLED`, `POSTGRES_URL_NON_POOLING`,
+`DATABASE_URL`, and `POSTGRES_URL`).
+
+For Preview deployments, configure `T2T_DATABASE_URL` with the dedicated
+staging Neon branch connection string. Do not point Preview at the production
+database. Keep credentials in Vercel environment settings; never commit or
+paste connection strings into source code or logs.
+
 ## Final receiving address
 
 Set `T2T_TRON_RECEIVER_ADDRESS` to the confirmed Binance USDT TRC20 deposit address. Both payment-order creation and the confirmed-event scanner use this same address. Customers pay directly to Binance; T2T verifies the transfer and records the result. There is no intermediate T2T wallet and no forwarding transaction.
@@ -84,3 +96,47 @@ Never hardcode the deposit address in source code. Configure it as a protected d
 ## Important current boundary
 
 The scanner records and matches confirmed USDT transfers idempotently. It does not create forwarding jobs, sign transactions or broadcast funds. A payment is marked `CONFIRMED` only after the confirmed on-chain transfer matches its invoice.
+
+
+## S2S terminal access administration
+
+The local/admin page is `/admin.html`. It uses:
+- `T2T_S2S_AUTHORIZATION_ADMIN_TOKEN`: high-entropy shared bearer credential (minimum 32 characters).
+- `T2T_S2S_AUTHORIZATION_ADMIN_ID`: configured audit actor label (1-64 characters; letters, digits, dot, underscore or hyphen).
+
+The same credentials protect `POST /api/console/s2s-terminal-access` and
+`GET /api/console/s2s-terminal-audit`. Grant/revoke changes and audit inserts
+occur in one database transaction. Repeated grants/revokes that do not change
+state do not create duplicate audit events.
+
+The actor ID is a server-configured label, not an authenticated human identity.
+This shared-token mechanism does not provide individual administrator identity
+or per-person attribution. Keep the admin token unset and the grant/revoke
+endpoints disabled in deployed environments until individual administrator
+authentication and authorization are implemented and reviewed. The endpoints
+fail closed when the required admin configuration is absent.
+A shared bearer token does not provide individual administrator accountability.
+Use an independently authenticated identity provider and per-user authorization
+before treating this as a multi-admin production control. Never place the admin
+token in source code, public frontend configuration, or browser storage.
+
+
+## Generic S2S client administration
+
+The secured `/admin.html` page provisions BANK, MERCHANT and POS clients.
+`POST /api/console/s2s-client-admin` supports `create_client`, `register_key`,
+`revoke_client` and `revoke_key`. `GET` on the same endpoint returns the
+client/key administration audit history. All changes and their audit records
+are committed in one database transaction.
+
+For `create_client`, provide a unique `clientId`, `clientType`, `displayName`,
+`keyId` and Base64 DER/SPKI P-256 public key. The client and first active key
+are created atomically. Additional keys can be registered against an active
+client. Revoking a client also revokes all its active keys. Revoking one key
+does not revoke the client.
+
+Generate private keys on the integrating BANK or MERCHANT server. The private
+key must remain in that system's secret manager and must never be sent to T2T.
+Only the P-256 public key is registered. The administration endpoint uses the
+same shared admin bearer token and configured actor label described above;
+it is not an individual-user identity system.

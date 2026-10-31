@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import pg from "pg";
+import { consumeS2sRateLimit } from "../../lib/s2s-rate-limit.mjs";
 
 const { Pool } = pg;
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
@@ -10,6 +11,7 @@ let pool;
 function getPool() {
   if (!pool) {
     const connectionString =
+      process.env.T2T_DATABASE_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
       process.env.POSTGRES_URL_NON_POOLING ||
       process.env.DATABASE_URL ||
@@ -125,6 +127,18 @@ export function createHandler({ poolProvider = getPool, now = () => Date.now() }
          VALUES ($1, $2)`,
         [terminalId, nonce]
       );
+
+      const withinLimit = await consumeS2sRateLimit(client, {
+        subjectType: "TERMINAL",
+        subjectId: terminalId,
+        endpoint: "heartbeat",
+        limit: 120,
+        now: now()
+      });
+      if (!withinLimit) {
+        await client.query("COMMIT");
+        return res.status(429).json({ error: "Heartbeat rate limit exceeded" });
+      }
 
       await client.query(
         `UPDATE public.t2t_trusted_terminals

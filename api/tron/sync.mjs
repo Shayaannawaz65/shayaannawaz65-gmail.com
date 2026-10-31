@@ -30,6 +30,7 @@ function getPool() {
   if (!pool) {
     // Prefer the pooled connection for serverless execution.
     const connectionString =
+      process.env.T2T_DATABASE_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
       process.env.POSTGRES_URL_NON_POOLING ||
       process.env.DATABASE_URL ||

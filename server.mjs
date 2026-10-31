@@ -8,6 +8,9 @@ import paymentOrdersHandler from './api/console/payment-orders.mjs';
 import paymentQuoteHandler from './api/console/payment-quote-issuer.mjs';
 import paymentStatusHandler from './api/console/payment-status.mjs';
 import paymentOrderListHandler from './api/console/payment-order-list.mjs';
+import s2sTerminalAccessHandler from './api/console/s2s-terminal-access.mjs';
+import s2sTerminalAuditHandler from './api/console/s2s-terminal-audit.mjs';
+import s2sClientAdminHandler from './api/console/s2s-client-admin.mjs';
 
 const app = express();
 app.disable('x-powered-by');
@@ -26,6 +29,9 @@ app.all('/api/console/payment-status', paymentStatusHandler);
 app.get('/api/console/status', consoleStatusHandler);
 app.get('/api/console/transactions', transactionsHandler);
 app.get('/api/console/payment-order-list', paymentOrderListHandler);
+app.all('/api/console/s2s-terminal-access', s2sTerminalAccessHandler);
+app.get('/api/console/s2s-terminal-audit', s2sTerminalAuditHandler);
+app.all('/api/console/s2s-client-admin', s2sClientAdminHandler);
 
 app.get('/health', (_req, res) => {
   res.json({

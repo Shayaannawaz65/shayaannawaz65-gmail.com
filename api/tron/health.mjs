@@ -22,6 +22,7 @@ export function createHealthHandler() {
       process.env.T2T_TRON_RECEIVER_ADDRESS &&
       process.env.TRONGRID_API_KEY &&
       (
+        process.env.T2T_DATABASE_URL ||
         process.env.DATABASE_URL ||
         process.env.POSTGRES_URL ||
         process.env.DATABASE_URL_UNPOOLED ||

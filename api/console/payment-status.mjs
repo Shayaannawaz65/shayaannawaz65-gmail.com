@@ -7,6 +7,7 @@ let pool;
 function getPool() {
   if (!pool) {
     const connectionString =
+      process.env.T2T_DATABASE_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
       process.env.POSTGRES_URL_NON_POOLING ||
       process.env.DATABASE_URL ||
@@ -49,7 +50,7 @@ export function createHandler({ poolProvider = getPool } = {}) {
     try {
       const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
       const result = await poolProvider().query(
-        `SELECT order_id, invoice_reference, currency, amount_usd_cents,
+        `SELECT order_id, invoice_reference, currency, amount_usd_cents::text AS amount_usd_cents,
                 amount_usdt_raw::text AS amount_usdt_raw,
                 token_contract, receiver_address, status, expires_at,
                 confirmed_at
@@ -73,7 +74,7 @@ export function createHandler({ poolProvider = getPool } = {}) {
         orderId: order.order_id,
         invoiceReference: order.invoice_reference,
         currency: order.currency,
-        amountUsdCents: Number(order.amount_usd_cents),
+        amountUsdCents: order.amount_usd_cents,
         amountUsdtRaw: order.amount_usdt_raw,
         tokenContract: order.token_contract,
         receiverAddress: order.receiver_address,

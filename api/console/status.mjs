@@ -19,7 +19,8 @@ function responseCapture() {
 
 function connectionPool(env = process.env) {
   if (!pool) {
-    const connectionString = env.DATABASE_URL_UNPOOLED ||
+    const connectionString = env.T2T_DATABASE_URL ||
+      env.DATABASE_URL_UNPOOLED ||
       env.POSTGRES_URL_NON_POOLING ||
       env.DATABASE_URL || env.POSTGRES_URL;
     if (!connectionString || connectionString.includes("[SENSITIVE]")) {
@@ -66,6 +67,7 @@ export function createHandler({ poolProvider, env = process.env, now = () => Dat
 
   const token = env.T2T_TRON_SYNC_TOKEN || "";
   const databaseConfigured = [
+    env.T2T_DATABASE_URL,
     env.DATABASE_URL_UNPOOLED,
     env.POSTGRES_URL_NON_POOLING,
     env.DATABASE_URL,
@@ -134,6 +136,7 @@ export function createHandler({ poolProvider, env = process.env, now = () => Dat
 
   const receiverAddress = env.T2T_TRON_RECEIVER_ADDRESS || "";
   const receiverValid = typeof receiverAddress === "string" &&
+    receiverAddress.length > 0 &&
     normalizeTronAddress(receiverAddress) === receiverAddress;
   const merchantBranch = {
     status: receiverValid ? "configured" : "not_configured",

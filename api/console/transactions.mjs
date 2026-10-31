@@ -7,6 +7,7 @@ let pool;
 function connectionPool() {
   if (!pool) {
     const connectionString =
+      process.env.T2T_DATABASE_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
       process.env.POSTGRES_URL_NON_POOLING ||
       process.env.DATABASE_URL ||

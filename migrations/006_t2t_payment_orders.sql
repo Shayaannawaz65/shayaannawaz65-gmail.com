@@ -49,22 +49,8 @@ CREATE TABLE public.t2t_payment_orders (
     matched_transaction_id CHAR(64),
     matched_event_index INTEGER,
 
-    forwarding_status TEXT NOT NULL DEFAULT 'NOT_STARTED'
-        CHECK (
-            forwarding_status IN (
-                'NOT_STARTED',
-                'PENDING',
-                'SUBMITTED',
-                'CONFIRMED',
-                'FAILED'
-            )
-        ),
-
-    forwarding_transaction_id CHAR(64),
-
     expires_at TIMESTAMPTZ NOT NULL,
     confirmed_at TIMESTAMPTZ,
-    forwarded_at TIMESTAMPTZ,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -76,11 +62,6 @@ CREATE TABLE public.t2t_payment_orders (
             matched_transaction_id ~ '^[0-9a-fA-F]{64}$'
             AND matched_event_index >= 0
         )
-    ),
-
-    CHECK (
-        forwarding_transaction_id IS NULL
-        OR forwarding_transaction_id ~ '^[0-9a-fA-F]{64}$'
     )
 );
 

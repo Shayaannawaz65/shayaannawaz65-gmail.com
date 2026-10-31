@@ -1,20 +1,25 @@
 import crypto from "node:crypto";
 import pg from "pg";
+import { consumeS2sRateLimit } from "../../lib/s2s-rate-limit.mjs";
 import { normalizeTronAddress } from "../tron/address.mjs";
 import { verifyPaymentQuote } from "../../lib/payment-quote.mjs";
 
 const { Pool } = pg;
+const CLIENT_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 const TERMINAL_ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const NONCE_RE = /^[a-f0-9]{32,64}$/i;
 const KEY_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 const INVOICE_RE = /^[A-Za-z0-9._/-]{1,120}$/;
+const USD_CENTS_RE = /^[1-9][0-9]{0,77}$/;
 const RAW_AMOUNT_RE = /^[1-9][0-9]{0,77}$/;
+const UINT256_MAX = 2n ** 256n - 1n;
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
 let pool;
 
 function getPool() {
   if (!pool) {
     const connectionString =
+      process.env.T2T_DATABASE_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
       process.env.POSTGRES_URL_NON_POOLING ||
       process.env.DATABASE_URL ||
@@ -40,6 +45,92 @@ function getPool() {
   return pool;
 }
 
+function validRawAmount(value) {
+  return RAW_AMOUNT_RE.test(value) && BigInt(value) <= UINT256_MAX;
+}
+
+function canonicalOrder({
+  keyId, clientId, terminalId, timestamp, nonce, invoiceReference,
+  amountUsdCents, amountUsdtRaw, expiresInSeconds, quote
+}) {
+  const metadataHash = crypto.createHash("sha256")
+    .update(JSON.stringify(quote?.rateMetadata ?? null))
+    .digest("hex");
+
+  return [
+    "T2T_S2S_PAYMENT_ORDER_V2",
+    keyId,
+    clientId,
+    terminalId || "",
+    timestamp,
+    nonce,
+    invoiceReference,
+    amountUsdCents,
+    amountUsdtRaw,
+    expiresInSeconds,
+    String(quote?.quoteId || ""),
+    String(quote?.rateNumerator || ""),
+    String(quote?.rateDenominator || ""),
+    String(quote?.expiresAt || ""),
+    String(quote?.signature || ""),
+    metadataHash
+  ].join("\n");
+}
+
+function verifyClientSignature(publicKeyBase64, canonical, signature) {
+  try {
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(publicKeyBase64, "base64"),
+      format: "der",
+      type: "spki"
+    });
+    return crypto.verify("sha256", Buffer.from(canonical, "utf8"), publicKey, signature);
+  } catch {
+    return false;
+  }
+}
+
+async function loadAuthorizedPrincipal(client, { keyId, terminalId, lock = false }) {
+  const result = await client.query(
+    `SELECT c.client_id, c.client_type, c.status AS client_status,
+            mk.public_key_base64, mk.status AS key_status
+       FROM public.t2t_s2s_client_keys mk
+       JOIN public.t2t_s2s_clients c ON c.client_id = mk.client_id
+      WHERE mk.key_id = $1
+        AND mk.status = 'ACTIVE'
+        AND c.status = 'ACTIVE'
+      ${lock ? "FOR UPDATE OF mk, c" : ""}`,
+    [keyId]
+  );
+
+  if (result.rowCount !== 1) return null;
+  const principal = result.rows[0];
+
+  if (principal.client_type === "POS") {
+    if (!terminalId) return null;
+  } else if (terminalId) {
+    return null;
+  }
+
+  if (terminalId) {
+    const terminal = await client.query(
+      `SELECT t.terminal_id
+         FROM public.t2t_trusted_terminals t
+         JOIN public.t2t_s2s_key_terminals auth
+           ON auth.terminal_id = t.terminal_id
+          AND auth.key_id = $2
+          AND auth.status = 'ACTIVE'
+        WHERE t.terminal_id = $1
+          AND t.status = 'ACTIVE'
+        ${lock ? "FOR UPDATE OF t, auth" : ""}`,
+      [terminalId, keyId]
+    );
+    if (terminal.rowCount !== 1) return null;
+  }
+
+  return principal;
+}
+
 export function createHandler({
   poolProvider = getPool,
   env = process.env,
@@ -59,27 +150,29 @@ export function createHandler({
       return res.status(400).json({ error: "Invalid request" });
     }
 
-    const terminalId = String(body.terminalId || "");
+    const terminalId = body.terminalId == null || body.terminalId === ""
+      ? null : String(body.terminalId);
     const timestamp = Number(body.timestamp);
     const nonce = String(body.nonce || "");
     const keyId = String(req.headers?.["x-t2t-key-id"] || "");
     const signatureB64 = String(req.headers?.["x-t2t-signature"] || "");
     const invoiceReference = String(body.invoiceReference || "");
-    const amountUsdCents = body.amountUsdCents;
+    const amountUsdCents = typeof body.amountUsdCents === "string"
+      ? body.amountUsdCents
+      : String(body.amountUsdCents ?? "");
     const amountUsdtRaw = String(body.amountUsdtRaw || "");
     const quote = body.quote;
     const expiresInSeconds = body.expiresInSeconds;
 
     if (
-      !TERMINAL_ID_RE.test(terminalId) ||
+      (terminalId !== null && !TERMINAL_ID_RE.test(terminalId)) ||
       !KEY_ID_RE.test(keyId) ||
       !Number.isSafeInteger(timestamp) ||
       Math.abs(now() - timestamp) > MAX_CLOCK_SKEW_MS ||
       !NONCE_RE.test(nonce) ||
       !INVOICE_RE.test(invoiceReference) ||
-      !Number.isSafeInteger(amountUsdCents) ||
-      amountUsdCents <= 0 ||
-      !RAW_AMOUNT_RE.test(amountUsdtRaw) ||
+      !USD_CENTS_RE.test(amountUsdCents) ||
+      !validRawAmount(amountUsdtRaw) ||
       !Number.isSafeInteger(expiresInSeconds) ||
       expiresInSeconds < 60 ||
       expiresInSeconds > 86400 ||
@@ -103,51 +196,11 @@ export function createHandler({
     let parsedBaseUrl;
     try {
       parsedBaseUrl = new URL(baseUrl);
-      if (
-        parsedBaseUrl.protocol !== "https:" &&
-        parsedBaseUrl.hostname !== "localhost"
-      ) {
+      if (parsedBaseUrl.protocol !== "https:" && parsedBaseUrl.hostname !== "localhost") {
         throw new Error("HTTPS required");
       }
     } catch {
       return res.status(503).json({ error: "Payment link configuration unavailable" });
-    }
-
-    const quoteSignature = String(quote?.signature || "");
-    const quoteMetadataHash = crypto.createHash("sha256")
-      .update(JSON.stringify(quote?.rateMetadata ?? null))
-      .digest("hex");
-    const canonical = [
-      "T2T_S2S_PAYMENT_ORDER_V1",
-      keyId,
-      terminalId,
-      timestamp,
-      nonce,
-      invoiceReference,
-      amountUsdCents,
-      amountUsdtRaw,
-      expiresInSeconds,
-      String(quote?.quoteId || ""),
-      String(quote?.rateNumerator || ""),
-      String(quote?.rateDenominator || ""),
-      String(quote?.expiresAt || ""),
-      quoteSignature,
-      quoteMetadataHash
-    ].join("\n");
-
-    let verifiedQuote;
-    try {
-      verifiedQuote = verifyPaymentQuote({
-        quote,
-        terminalId,
-        invoiceReference,
-        amountUsdCents,
-        amountUsdtRaw,
-        now: now(),
-        publicKeyBase64: env.T2T_EXCHANGE_QUOTE_PUBLIC_KEY
-      });
-    } catch {
-      return res.status(401).json({ error: "Invalid or untrusted exchange-rate quote" });
     }
 
     let client;
@@ -158,46 +211,50 @@ export function createHandler({
       await client.query("BEGIN");
       inTransaction = true;
 
-      const trusted = await client.query(
-        `SELECT t.terminal_id,
-                mk.public_key_base64 AS merchant_public_key_base64
-           FROM public.t2t_trusted_terminals t
-           JOIN public.t2t_s2s_client_keys mk
-             ON mk.key_id = $2
-            AND mk.status = 'ACTIVE'
-          WHERE t.terminal_id = $1
-            AND t.status = 'ACTIVE'
-          FOR UPDATE OF t, mk`,
-        [terminalId, keyId]
-      );
+      const principal = await loadAuthorizedPrincipal(client, {
+        keyId, terminalId, lock: true
+      });
 
-      if (trusted.rowCount !== 1) {
+      if (!principal || !CLIENT_ID_RE.test(principal.client_id)) {
         await client.query("ROLLBACK");
         inTransaction = false;
-        return res.status(401).json({ error: "Terminal or merchant not trusted" });
+        return res.status(401).json({ error: "S2S client or key not trusted" });
       }
 
-      let verified = false;
-      try {
-        const publicKey = crypto.createPublicKey({
-          key: Buffer.from(trusted.rows[0].merchant_public_key_base64, "base64"),
-          format: "der",
-          type: "spki"
-        });
-        verified = crypto.verify(
-          "sha256",
-          Buffer.from(canonical, "utf8"),
-          publicKey,
-          signature
-        );
-      } catch {
-        verified = false;
-      }
+      const canonical = canonicalOrder({
+        keyId,
+        clientId: principal.client_id,
+        terminalId,
+        timestamp,
+        nonce,
+        invoiceReference,
+        amountUsdCents,
+        amountUsdtRaw,
+        expiresInSeconds,
+        quote
+      });
 
-      if (!verified) {
+      if (!verifyClientSignature(principal.public_key_base64, canonical, signature)) {
         await client.query("ROLLBACK");
         inTransaction = false;
         return res.status(401).json({ error: "Invalid S2S signature" });
+      }
+
+      let verifiedQuote;
+      try {
+        verifiedQuote = verifyPaymentQuote({
+          quote,
+          clientId: principal.client_id,
+          invoiceReference,
+          amountUsdCents,
+          amountUsdtRaw,
+          now: now(),
+          publicKeyBase64: env.T2T_EXCHANGE_QUOTE_PUBLIC_KEY
+        });
+      } catch {
+        await client.query("ROLLBACK");
+        inTransaction = false;
+        return res.status(401).json({ error: "Invalid or untrusted exchange-rate quote" });
       }
 
       const receiverAddress = env.T2T_TRON_RECEIVER_ADDRESS || "";
@@ -216,38 +273,44 @@ export function createHandler({
         [keyId, nonce]
       );
 
+      const withinLimit = await consumeS2sRateLimit(client, {
+        subjectType: "CLIENT_KEY",
+        subjectId: keyId,
+        endpoint: "payment-orders",
+        limit: 30,
+        now: now()
+      });
+
+      if (!withinLimit) {
+        await client.query("COMMIT");
+        inTransaction = false;
+        return res.status(429).json({ error: "Client request rate limit exceeded" });
+      }
+
       const token = randomBytes(32).toString("base64url");
       const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
       const inserted = await client.query(
         `INSERT INTO public.t2t_payment_orders (
-           terminal_id,
-           s2s_key_id,
-           invoice_reference,
-           currency,
-           amount_usd_cents,
-           token_contract,
-           amount_usdt_raw,
-           receiver_address,
-           payment_token_hash,
-           quote_id,
-           exchange_rate_numerator,
-           exchange_rate_denominator,
-           exchange_rate_metadata,
-           quote_expires_at,
-           expires_at
+           client_id, terminal_id, s2s_key_id, invoice_reference, currency,
+           amount_usd_cents, token_contract, amount_usdt_raw, receiver_address,
+           payment_token_hash, quote_id, exchange_rate_numerator,
+           exchange_rate_denominator, exchange_rate_metadata,
+           quote_expires_at, expires_at
          )
          VALUES (
-           $1, $2, $3, 'USD', $4,
+           $1, $2, $3, $4, 'USD', $5,
            'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-           $5, $6, $7,
-           $8, $9, $10, $11::jsonb, to_timestamp($12 / 1000.0),
-           NOW() + ($13 * INTERVAL '1 second')
+           $6, $7, $8, $9, $10, $11, $12::jsonb,
+           to_timestamp($13 / 1000.0),
+           NOW() + ($14 * INTERVAL '1 second')
          )
-         RETURNING order_id, invoice_reference, amount_usd_cents,
+         RETURNING order_id, invoice_reference,
+                   amount_usd_cents::text AS amount_usd_cents,
                    amount_usdt_raw::text AS amount_usdt_raw,
                    receiver_address, expires_at, status`,
         [
+          principal.client_id,
           terminalId,
           keyId,
           invoiceReference,
@@ -270,15 +333,17 @@ export function createHandler({
       const order = inserted.rows[0];
       return res.status(201).json({
         orderId: order.order_id,
+        clientId: principal.client_id,
+        clientType: principal.client_type,
         invoiceReference: order.invoice_reference,
         currency: "USD",
-        amountUsdCents: Number(order.amount_usd_cents),
+        amountUsdCents: order.amount_usd_cents,
         amountUsdtRaw: order.amount_usdt_raw,
         tokenContract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
         receiverAddress: order.receiver_address,
         status: order.status,
         expiresAt: new Date(order.expires_at).toISOString(),
-        paymentUrl: `${baseUrl}/pay.html?token=${token}`,
+        paymentUrl: `${baseUrl}/pay.html?token=${token}`
       });
     } catch (error) {
       if (client && inTransaction) {

@@ -1,13 +1,16 @@
 import crypto from "node:crypto";
 import pg from "pg";
+import { consumeS2sRateLimit } from "../../lib/s2s-rate-limit.mjs";
 import { getValidatedUsdtUsdRate } from "../../lib/exchange-rate.mjs";
 import { buildPaymentQuoteCanonical } from "../../lib/payment-quote.mjs";
 
 const { Pool } = pg;
+const CLIENT_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 const TERMINAL_ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const NONCE_RE = /^[a-f0-9]{32,64}$/i;
 const KEY_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 const INVOICE_RE = /^[A-Za-z0-9._/-]{1,120}$/;
+const USD_CENTS_RE = /^[1-9][0-9]{0,77}$/;
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
 const QUOTE_TTL_MS = 30 * 1000;
 let pool;
@@ -15,6 +18,7 @@ let pool;
 function getPool() {
   if (!pool) {
     const connectionString =
+      process.env.T2T_DATABASE_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
       process.env.POSTGRES_URL_NON_POOLING ||
       process.env.DATABASE_URL ||
@@ -78,6 +82,9 @@ function loadQuoteConfig(env) {
     type: "spki"
   });
 
+  if (!derivedPublic.equals(publicKey.export({ format: "der", type: "spki" }))) {
+    throw new Error("Quote signing key pair mismatch");
+  }
   if (!derivedPublic.equals(configuredPublic)) {
     throw new Error("Quote signing key pair mismatch");
   }
@@ -85,6 +92,71 @@ function loadQuoteConfig(env) {
   return { privateKey };
 }
 
+function canonicalRequest({ keyId, clientId, terminalId, timestamp, nonce, invoiceReference, amountUsdCents }) {
+  return [
+    "T2T_S2S_PAYMENT_QUOTE_V2",
+    keyId,
+    clientId,
+    terminalId || "",
+    timestamp,
+    nonce,
+    invoiceReference,
+    amountUsdCents
+  ].join("\n");
+}
+
+function verifyClientSignature(publicKeyBase64, canonical, signature) {
+  try {
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(publicKeyBase64, "base64"),
+      format: "der",
+      type: "spki"
+    });
+    return crypto.verify("sha256", Buffer.from(canonical, "utf8"), publicKey, signature);
+  } catch {
+    return false;
+  }
+}
+
+async function loadPrincipal(client, { keyId, terminalId, lock = false }) {
+  const result = await client.query(
+    `SELECT c.client_id, c.client_type, mk.public_key_base64
+       FROM public.t2t_s2s_client_keys mk
+       JOIN public.t2t_s2s_clients c ON c.client_id = mk.client_id
+      WHERE mk.key_id = $1
+        AND mk.status = 'ACTIVE'
+        AND c.status = 'ACTIVE'
+      ${lock ? "FOR UPDATE OF mk, c" : ""}`,
+    [keyId]
+  );
+
+  if (result.rowCount !== 1) return null;
+  const principal = result.rows[0];
+
+  if (principal.client_type === "POS") {
+    if (!terminalId) return null;
+  } else if (terminalId) {
+    return null;
+  }
+
+  if (terminalId) {
+    const terminal = await client.query(
+      `SELECT t.terminal_id
+         FROM public.t2t_trusted_terminals t
+         JOIN public.t2t_s2s_key_terminals auth
+           ON auth.terminal_id = t.terminal_id
+          AND auth.key_id = $2
+          AND auth.status = 'ACTIVE'
+        WHERE t.terminal_id = $1
+          AND t.status = 'ACTIVE'
+        ${lock ? "FOR UPDATE OF t, auth" : ""}`,
+      [terminalId, keyId]
+    );
+    if (terminal.rowCount !== 1) return null;
+  }
+
+  return principal;
+}
 
 export function createHandler({
   poolProvider = getPool,
@@ -106,23 +178,25 @@ export function createHandler({
       return res.status(400).json({ error: "Invalid quote request" });
     }
 
-    const terminalId = String(body.terminalId || "");
+    const terminalId = body.terminalId == null || body.terminalId === ""
+      ? null : String(body.terminalId);
     const timestamp = Number(body.timestamp);
     const nonce = String(body.nonce || "");
     const invoiceReference = String(body.invoiceReference || "");
-    const amountUsdCents = body.amountUsdCents;
+    const amountUsdCents = typeof body.amountUsdCents === "string"
+      ? body.amountUsdCents
+      : String(body.amountUsdCents ?? "");
     const keyId = String(req.headers?.["x-t2t-key-id"] || "");
     const signatureB64 = String(req.headers?.["x-t2t-signature"] || "");
 
     if (
-      !TERMINAL_ID_RE.test(terminalId) ||
+      (terminalId !== null && !TERMINAL_ID_RE.test(terminalId)) ||
       !KEY_ID_RE.test(keyId) ||
       !Number.isSafeInteger(timestamp) ||
       Math.abs(now() - timestamp) > MAX_CLOCK_SKEW_MS ||
       !NONCE_RE.test(nonce) ||
       !INVOICE_RE.test(invoiceReference) ||
-      !Number.isSafeInteger(amountUsdCents) ||
-      amountUsdCents <= 0 ||
+      !USD_CENTS_RE.test(amountUsdCents) ||
       signatureB64.length < 40 ||
       signatureB64.length > 1024
     ) {
@@ -132,10 +206,7 @@ export function createHandler({
     let signature;
     try {
       signature = Buffer.from(signatureB64, "base64");
-      if (
-        signature.length < 32 ||
-        signature.toString("base64") !== signatureB64
-      ) {
+      if (signature.length < 32 || signature.toString("base64") !== signatureB64) {
         throw new Error("Invalid signature");
       }
     } catch {
@@ -149,16 +220,6 @@ export function createHandler({
       return res.status(503).json({ error: "Quote service not configured" });
     }
 
-    const canonicalRequest = [
-      "T2T_S2S_PAYMENT_QUOTE_V1",
-      keyId,
-      terminalId,
-      timestamp,
-      nonce,
-      invoiceReference,
-      amountUsdCents
-    ].join("\n");
-
     let client = null;
     let inTransaction = false;
 
@@ -170,64 +231,48 @@ export function createHandler({
     };
 
     try {
-      // Read the terminal key, verify the request, then release the DB
-      // connection before making any external market-data requests.
+      // Resolve client identity from key ownership; no terminal is needed for BANK/MERCHANT.
       client = await poolProvider().connect();
-      const initial = await client.query(
-        `SELECT mk.public_key_base64
-           FROM public.t2t_s2s_client_keys mk
-           JOIN public.t2t_trusted_terminals t
-             ON t.terminal_id = $2 AND t.status = 'ACTIVE'
-          WHERE mk.key_id = $1 AND mk.status = 'ACTIVE'`,
-        [keyId, terminalId]
-      );
-      if (initial.rowCount !== 1) {
-        return res.status(401).json({ error: "S2S client not trusted" });
+      const initial = await loadPrincipal(client, { keyId, terminalId });
+      if (!initial || !CLIENT_ID_RE.test(initial.client_id)) {
+        return res.status(401).json({ error: "S2S client or key not trusted" });
       }
 
-      const verifyTerminalSignature = publicKeyBase64 => {
-        try {
-          const terminalPublicKey = crypto.createPublicKey({
-            key: Buffer.from(publicKeyBase64, "base64"),
-            format: "der",
-            type: "spki"
-          });
-          return crypto.verify(
-            "sha256",
-            Buffer.from(canonicalRequest, "utf8"),
-            terminalPublicKey,
-            signature
-          );
-        } catch {
-          return false;
-        }
-      };
+      const signedRequest = canonicalRequest({
+        keyId,
+        clientId: initial.client_id,
+        terminalId,
+        timestamp,
+        nonce,
+        invoiceReference,
+        amountUsdCents
+      });
 
-      if (!verifyTerminalSignature(initial.rows[0].public_key_base64)) {
-        return res.status(401).json({ error: "Invalid terminal signature" });
+      if (!verifyClientSignature(initial.public_key_base64, signedRequest, signature)) {
+        return res.status(401).json({ error: "Invalid S2S signature" });
       }
 
       releaseClient();
 
-      // No database connection, transaction, or row lock is held while
-      // Kraken and CoinGecko are contacted.
+      // Market-data calls happen without holding a DB connection or row lock.
       const marketRate = await rateProvider({ now, env });
       const rateNumerator = String(marketRate?.rateNumerator || "");
       const rateDenominator = String(marketRate?.rateDenominator || "");
       const metadata = marketRate?.metadata;
       const quoteNow = now();
+
       if (
         !/^[1-9][0-9]{0,17}$/.test(rateNumerator) ||
         !/^[1-9][0-9]{0,17}$/.test(rateDenominator) ||
         !metadata ||
         metadata.method !== "kraken_coingecko_midpoint_v1" ||
         !Number.isSafeInteger(metadata.observedAt) ||
-        quoteNow - metadata.observedAt > 30_000 ||
-        metadata.observedAt - quoteNow > 5_000 ||
+        quoteNow - metadata.observedAt > 30000 ||
+        metadata.observedAt - quoteNow > 5000 ||
         !Number.isSafeInteger(metadata.krakenTradeAt) ||
         !Number.isSafeInteger(metadata.coingeckoUpdatedAt) ||
         [metadata.krakenTradeAt, metadata.coingeckoUpdatedAt].some(
-          time => quoteNow - time > 30_000 || time - quoteNow > 5_000
+          time => quoteNow - time > 30000 || time - quoteNow > 5000
         )
       ) {
         throw new Error("Invalid or stale market-rate result");
@@ -237,7 +282,7 @@ export function createHandler({
       const expiresAt = quoteNow + QUOTE_TTL_MS;
       const canonicalQuote = buildPaymentQuoteCanonical({
         quoteId,
-        terminalId,
+        clientId: initial.client_id,
         invoiceReference,
         amountUsdCents,
         rateNumerator,
@@ -251,23 +296,21 @@ export function createHandler({
         config.privateKey
       ).toString("base64");
 
-      // Reacquire and lock the terminal after market calls. This closes the
-      // revocation/key-rotation race before the nonce is consumed.
+      // Re-check key/client/optional terminal after external market calls.
       client = await poolProvider().connect();
       await client.query("BEGIN");
       inTransaction = true;
-      const trusted = await client.query(
-        `SELECT mk.public_key_base64
-           FROM public.t2t_s2s_client_keys mk
-           JOIN public.t2t_trusted_terminals t
-             ON t.terminal_id = $2 AND t.status = 'ACTIVE'
-          WHERE mk.key_id = $1 AND mk.status = 'ACTIVE'
-          FOR UPDATE OF mk, t`,
-        [keyId, terminalId]
-      );
+
+      const trusted = await loadPrincipal(client, { keyId, terminalId, lock: true });
       if (
-        trusted.rowCount !== 1 ||
-        !verifyTerminalSignature(trusted.rows[0]?.public_key_base64 || "")
+        !trusted ||
+        trusted.client_id !== initial.client_id ||
+        trusted.client_type !== initial.client_type ||
+        !verifyClientSignature(
+          trusted.public_key_base64,
+          signedRequest,
+          signature
+        )
       ) {
         await client.query("ROLLBACK");
         inTransaction = false;
@@ -279,6 +322,21 @@ export function createHandler({
          VALUES ($1, $2)`,
         [keyId, nonce]
       );
+
+      const withinLimit = await consumeS2sRateLimit(client, {
+        subjectType: "CLIENT_KEY",
+        subjectId: keyId,
+        endpoint: "payment-quotes",
+        limit: 60,
+        now: now()
+      });
+
+      if (!withinLimit) {
+        await client.query("COMMIT");
+        inTransaction = false;
+        return res.status(429).json({ error: "Client quote rate limit exceeded" });
+      }
+
       await client.query("COMMIT");
       inTransaction = false;
 

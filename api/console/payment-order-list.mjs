@@ -7,6 +7,7 @@ let pool;
 function getPool() {
   if (!pool) {
     const connectionString =
+      process.env.T2T_DATABASE_URL ||
       process.env.DATABASE_URL_UNPOOLED ||
       process.env.POSTGRES_URL_NON_POOLING ||
       process.env.DATABASE_URL ||
@@ -70,9 +71,9 @@ export function createHandler({
     const offsetText = String(req.query?.offset ?? "0");
 
     if (
-      !/^(?:[1-9]\\d{0,2})$/.test(limitText) ||
+      !/^(?:[1-9]\d{0,2})$/.test(limitText) ||
       Number(limitText) > 100 ||
-      !/^(?:0|[1-9]\\d{0,8})$/.test(offsetText)
+      !/^(?:0|[1-9]\d{0,8})$/.test(offsetText)
     ) {
       return res.status(400).json({
         error: "Invalid pagination; limit must be 1-100 and offset 0-999999999"
