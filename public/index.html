@@ -17,16 +17,16 @@ main{max-width:1180px;margin:auto;padding:28px clamp(16px,4vw,40px)}.hero{displa
 <section class="grid">
 <article class="card"><div class="head"><h3>Backend API</h3><span class="pill warn" id="backend-pill">Checking</span></div><div class="value" id="backend-value">Waiting…</div><div class="detail" id="backend-detail">Checking existing /health endpoint.</div></article>
 <article class="card"><div class="head"><h3>Android Receiver POS</h3><span class="pill warn" id="terminal-pill">Checking</span></div><div class="value" id="terminal-value">OFFLINE-201.3-001</div><div class="detail" id="terminal-detail">Checking authenticated heartbeat status.</div></article>
-<article class="card"><div class="head"><h3>Central T2T receiving wallet</h3><span class="pill warn" id="receiver-pill">Checking</span></div><div class="value" id="receiver-value">Checking…</div><div class="detail" id="receiver-detail">Checking configured central TRON receiver.</div></article>
+<article class="card"><div class="head"><h3>Binance USDT TRC20 receiving address</h3><span class="pill warn" id="receiver-pill">Checking</span></div><div class="value" id="receiver-value">Checking…</div><div class="detail" id="receiver-detail">Checking configured central TRON receiver.</div></article>
 <article class="card"><div class="head"><h3>Database</h3><span class="pill warn" id="database-pill">Checking</span></div><div class="value" id="database-value">Checking…</div><div class="detail" id="database-detail">Running a read-only connection and schema check.</div></article>
 <article class="card"><div class="head"><h3>TRON provider</h3><span class="pill warn" id="provider-pill">Checking</span></div><div class="value" id="provider-value">Checking…</div><div class="detail" id="provider-detail">Checking TronGrid current block metadata.</div></article>
 <article class="card"><div class="head"><h3>Blockchain sync</h3><span class="pill warn">Not initiated here</span></div><div class="value">Monitor only</div><div class="detail">The protected /api/tron/sync endpoint is not triggered by this browser page. No payments are marked credited here.</div></article>
 </section>
 <section class="section wide"><article class="card"><h3>Integration checklist</h3>
-<div class="row"><span>Android TCP receiver</span><strong>Port 20130 in source</strong></div><div class="row"><span>Sender trust/signature verification</span><strong>Receiver path exists</strong></div><div class="row"><span>Cloud-to-device heartbeat</span><strong id="check-heartbeat">Checking</strong></div><div class="row"><span>Central receiving wallet</span><strong id="check-merchant">Not configured</strong></div><div class="row"><span>Central transaction feed</span><strong id="check-feed">Not configured</strong></div></article>
+<div class="row"><span>Android TCP receiver</span><strong>Port 20130 in source</strong></div><div class="row"><span>Sender trust/signature verification</span><strong>Receiver path exists</strong></div><div class="row"><span>Cloud-to-device heartbeat</span><strong id="check-heartbeat">Checking</strong></div><div class="row"><span>Binance receiving address</span><strong id="check-merchant">Not configured</strong></div><div class="row"><span>Central transaction feed</span><strong id="check-feed">Not configured</strong></div></article>
 <article class="card"><h3>Last backend response</h3><pre id="response" class="detail" style="white-space:pre-wrap;overflow-wrap:anywhere">No response received yet.</pre><div class="detail">Last check: <span id="lastcheck">—</span></div><div class="detail" id="integration-detail"></div></article></section>
 <div class="notice"><strong>Safety:</strong> this console does not modify terminal identity, Android Keystore keys, local transactions, database records, or blockchain state.</div>
-<footer>Live read-only health checks refresh every 60 seconds. Heartbeat requires a trusted terminal key and applied migration. Merchant S2S cryptographic authentication and settlement forwarding remain separate implementation stages.</footer></main>
+<footer>Live read-only health checks refresh every 60 seconds. Heartbeat requires a trusted terminal key and applied migration. S2S cryptographic authentication and payment verification are separate from the Android POS-to-POS transport.</footer></main>
 <script>
 const $ = id => document.getElementById(id);
 function setCard(prefix, status, value, detail) {
@@ -72,7 +72,7 @@ async function refresh() {
     setCard('receiver', d.merchantBranch.status, d.merchantBranch.status.replaceAll('_',' '), d.merchantBranch.detail);
     $('check-feed').textContent = d.transactionFeed.status.replaceAll('_',' ');
     $('integration-detail').textContent = d.blockchainSync.detail +
-      ' Central receiver: ' + d.merchantBranch.detail +
+      ' Binance receiver: ' + d.merchantBranch.detail +
       '. Transaction feed: ' + d.transactionFeed.detail;
     $('response').textContent = JSON.stringify({health, console:d}, null, 2);
     $('lastcheck').textContent = new Date(d.checked_at).toLocaleString();
