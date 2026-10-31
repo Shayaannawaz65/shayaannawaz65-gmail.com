@@ -149,8 +149,6 @@ export function createHandler({
 
       const trusted = await client.query(
         `SELECT t.public_key_base64,
-                m.internal_mid,
-                m.receiver_id,
                 m.receiver_address
            FROM public.t2t_trusted_terminals t
            JOIN public.t2t_terminal_merchant_mapping m
@@ -268,8 +266,6 @@ export function createHandler({
         status: order.status,
         expiresAt: new Date(order.expires_at).toISOString(),
         paymentUrl: `${baseUrl}/pay.html?token=${token}`,
-        merchantId: trusted.rows[0].internal_mid,
-        receiverId: trusted.rows[0].receiver_id
       });
     } catch (error) {
       if (client && inTransaction) {
