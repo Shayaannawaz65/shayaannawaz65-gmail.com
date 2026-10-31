@@ -35,7 +35,7 @@ nav a{color:#c6f36b;margin-right:16px}
 <body>
 <nav><a href="/">Operations console</a><a href="/merchant.html">Merchant dashboard</a></nav>
 <h1>T2T S2S Access Administration</h1>
-<p class="muted">Provision BANK, MERCHANT and POS S2S clients, manage P-256 signing keys, and administer POS terminal access.</p>
+<p class="muted">Provision merchant and POS S2S clients, manage P-256 signing keys, and administer POS terminal access.</p>
 
 <section class="panel">
   <h2>Administrator authentication</h2>
@@ -53,17 +53,16 @@ nav a{color:#c6f36b;margin-right:16px}
   <h2>Register S2S client and first signing key</h2>
   <p class="muted">The client identity and its first active P-256 public key are created atomically.</p>
   <label for="clientId">Client ID</label>
-  <input id="clientId" maxlength="128" autocomplete="off" placeholder="bank-primary or merchant-acme">
+  <input id="clientId" maxlength="128" autocomplete="off" placeholder="merchant-acme">
   <label for="clientType">Client type</label>
   <select id="clientType">
-    <option value="BANK">BANK</option>
     <option value="MERCHANT">MERCHANT</option>
     <option value="POS">POS</option>
   </select>
   <label for="displayName">Display name</label>
-  <input id="displayName" maxlength="160" autocomplete="off" placeholder="Bank / merchant name">
+  <input id="displayName" maxlength="160" autocomplete="off" placeholder="Merchant or POS display name">
   <label for="newKeyId">First key ID</label>
-  <input id="newKeyId" maxlength="128" autocomplete="off" placeholder="bank-primary-key-01">
+  <input id="newKeyId" maxlength="128" autocomplete="off" placeholder="merchant-acme-key-01">
   <label for="newPublicKey">P-256 public key (Base64 DER/SPKI)</label>
   <textarea id="newPublicKey" rows="4" spellcheck="false" autocomplete="off"
     placeholder="Base64 encoded public key only; never paste a private key"></textarea>
