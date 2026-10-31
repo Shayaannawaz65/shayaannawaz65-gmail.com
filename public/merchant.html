@@ -83,6 +83,13 @@ code{overflow-wrap:anywhere}
     return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
   }
 
+  function formatUsdCents(value) {
+    const cents = String(value ?? "");
+    if (!/^(?:0|[1-9][0-9]{0,77})$/.test(cents)) return "Invalid amount";
+    const padded = cents.padStart(3, "0");
+    return `${padded.slice(0, -2)}.${padded.slice(-2)}`;
+  }
+
   async function load() {
     if (!token) {
       message("Connect using the configured merchant dashboard token.", true);
@@ -119,7 +126,7 @@ code{overflow-wrap:anywhere}
         const tr = document.createElement("tr");
         cell(tr, date(order.createdAt));
         cell(tr, order.invoiceReference);
-        cell(tr, `${order.currency} ${(Number(order.amountUsdCents) / 100).toFixed(2)}`);
+        cell(tr, `${order.currency} ${formatUsdCents(order.amountUsdCents)}`);
         cell(tr, order.amountUsdtRaw);
 
         const status = cell(tr, order.status);
