@@ -781,9 +781,10 @@ test("confirms a uniquely matched payment order when the database updates one ro
       queries.includes("MATCHED_ORDER_UPDATE"),
       "sync must attempt the unique payment-order confirmation"
     );
-    assert.ok(
-      queries.some(sql => /INSERT INTO public\.t2t_usdt_forwarding_jobs/i.test(sql)),
-      "each uniquely confirmed order must create one idempotent forwarding job"
+    assert.equal(
+      queries.some(sql => /t2t_usdt_forwarding_jobs/i.test(sql)),
+      false,
+      "direct Binance receipt flow must not create forwarding jobs"
     );
     assert.ok(commits > 0);
     assert.equal(rollbacks, 0);
