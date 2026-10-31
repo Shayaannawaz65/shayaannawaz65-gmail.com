@@ -91,10 +91,12 @@ export function createHandler({
                 CASE WHEN status = 'PENDING' AND expires_at <= NOW()
                   THEN 'EXPIRED' ELSE status END AS status,
                 matched_transaction_id, matched_event_index,
-                forwarding_status, forwarding_transaction_id,
+                COALESCE(fj.status, o.forwarding_status) AS forwarding_status,
+                COALESCE(fj.forwarding_transaction_id, o.forwarding_transaction_id) AS forwarding_transaction_id,
                 expires_at, confirmed_at, forwarded_at, created_at, updated_at
-           FROM public.t2t_payment_orders
-          WHERE s2s_key_id = $1
+           FROM public.t2t_payment_orders o
+           LEFT JOIN public.t2t_usdt_forwarding_jobs fj ON fj.order_id = o.order_id
+          WHERE o.s2s_key_id = $1
           ORDER BY created_at DESC, order_id DESC
           LIMIT $2 OFFSET $3`,
         [keyId, Number(limitText), Number(offsetText)]
