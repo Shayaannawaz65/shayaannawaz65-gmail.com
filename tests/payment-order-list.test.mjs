@@ -112,7 +112,7 @@ test("authorized listing returns safe fields and parameterized pagination", asyn
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(params, [keyId, 10, 20]);
-  assert.match(sql, /LIMIT \$1 OFFSET \$2/);
+  assert.match(sql, /LIMIT \$2 OFFSET \$3/);
   assert.doesNotMatch(sql, /payment_token_hash|signing_key/);
   assert.equal(res.body.records.length, 1);
   assert.equal(res.body.records[0].amountUsdCents, "1250");
