@@ -23,7 +23,7 @@ VALUES ('merchant-prod-key-2026-01', '<BASE64_DER_SPKI_PUBLIC_KEY>');
 `POST /api/console/payment-orders`
 
 JSON body fields:
-- `terminalId`: registered active T2T terminal identity
+- `terminalId`: required only for POS clients; omitted for merchant clients
 - `timestamp`: Unix milliseconds
 - `nonce`: unique 32-64 character hex string
 - `invoiceReference`: merchant invoice reference
@@ -90,7 +90,7 @@ Never hardcode the deposit address in source code. Configure it as a protected d
 
 ## Payment channels
 
-- **S2S:** an authenticated merchant server creates a USD invoice through the signed S2S API.
+- **S2S:** an authenticated merchant server creates a USD invoice through the signed S2S API. No bank connection, bank credentials or bank-side integration is required.
 - **IP-to-IP POS:** a trusted POS device initiates a payment request directly to another trusted POS device over the T2T device transport. The device exchange must preserve authenticated device identity, request signatures, replay protection and the same server-issued USD-to-USDT quote. This cloud S2S API alone does not implement the POS-to-POS transport.
 
 ## Important current boundary
@@ -123,7 +123,7 @@ token in source code, public frontend configuration, or browser storage.
 
 ## Generic S2S client administration
 
-The secured `/admin.html` page provisions BANK, MERCHANT and POS clients.
+The secured `/admin.html` page provisions MERCHANT and POS clients. T2T uses its separate `T2T_INTERNAL` principal; no BANK integration is required or provisioned.
 `POST /api/console/s2s-client-admin` supports `create_client`, `register_key`,
 `revoke_client` and `revoke_key`. `GET` on the same endpoint returns the
 client/key administration audit history. All changes and their audit records
