@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHandler } from "../api/console/payment-order-list.mjs";
 
 const token = "test-merchant-dashboard-token-1234567890";
+const keyId = "merchant-key-test-001";
 
 function response() {
   return {
@@ -25,7 +26,7 @@ function request({ method = "GET", authorization, query = {} } = {}) {
 
 test("dashboard list is GET-only and disables caching", async () => {
   const res = response();
-  await createHandler({ env: { T2T_MERCHANT_DASHBOARD_TOKEN: token } })(
+  await createHandler({ env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId } })(
     request({ method: "POST" }), res
   );
   assert.equal(res.statusCode, 405);
@@ -48,7 +49,7 @@ test("unauthorized dashboard request never queries database", async () => {
   let queried = false;
   const res = response();
   await createHandler({
-    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token },
+    env: { T2T_MERCHANT_DASHBOARD_TOKEN: token, T2T_DASHBOARD_S2S_KEY_ID: keyId },
     poolProvider: () => ({ query: async () => { queried = true; } })
   })(request({ authorization: "Bearer wrong-token" }), res);
   assert.equal(res.statusCode, 401);
@@ -110,7 +111,7 @@ test("authorized listing returns safe fields and parameterized pagination", asyn
   }), res);
 
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(params, [10, 20]);
+  assert.deepEqual(params, [keyId, 10, 20]);
   assert.match(sql, /LIMIT \$1 OFFSET \$2/);
   assert.doesNotMatch(sql, /payment_token_hash|signing_key/);
   assert.equal(res.body.records.length, 1);
