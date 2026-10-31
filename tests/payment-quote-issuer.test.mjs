@@ -182,7 +182,7 @@ test("issues a signed quote for an authenticated S2S merchant", async () => {
   assert.equal(typeof res.body.quote.signature, "string");
   assert.ok(queries.some(q => q.sql === "COMMIT"));
   assert.ok(queries.some(q => q.sql.includes("FOR UPDATE")));
-  assert.ok(queries.some(q => q.sql.includes("INSERT INTO public.t2t_heartbeat_nonces")));
+  assert.ok(queries.some(q => q.sql.includes("INSERT INTO public.t2t_s2s_request_nonces")));
 });
 
 test("fails closed when market data cannot be validated", async () => {
@@ -200,7 +200,7 @@ test("fails closed when market data cannot be validated", async () => {
   assert.equal(res.body.error, "Quote service temporarily unavailable");
   assert.ok(!queries.some(q => q.sql === "BEGIN"));
   assert.ok(!queries.some(q => q.sql === "ROLLBACK"));
-  assert.ok(!queries.some(q => q.sql.includes("INSERT INTO public.t2t_heartbeat_nonces")));
+  assert.ok(!queries.some(q => q.sql.includes("INSERT INTO public.t2t_s2s_request_nonces")));
 });
 
 test("rejects an invalid S2S signature before issuing a quote", async () => {
