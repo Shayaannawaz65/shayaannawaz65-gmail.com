@@ -109,8 +109,8 @@ test("authorized listing returns payment fields scoped to its S2S key", async ()
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(params, [keyId, 10, 20]);
-  assert.match(sql, /LIMIT \\$2 OFFSET \\$3/);
-  assert.match(sql, /WHERE o\\.s2s_key_id = \\$1/);
+  assert.match(sql, /LIMIT \$2 OFFSET \$3/);
+  assert.match(sql, /WHERE o\.s2s_key_id = \$1/);
   assert.doesNotMatch(sql, /t2t_usdt_forwarding_jobs|payment_token_hash|signing_key/);
   assert.equal(res.body.records.length, 1);
   assert.equal(res.body.records[0].amountUsdCents, "1250");
