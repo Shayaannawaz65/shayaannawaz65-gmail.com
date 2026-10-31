@@ -6,6 +6,7 @@ import { buildPaymentQuoteCanonical } from "../../lib/payment-quote.mjs";
 const { Pool } = pg;
 const TERMINAL_ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const NONCE_RE = /^[a-f0-9]{32,64}$/i;
+const KEY_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 const INVOICE_RE = /^[A-Za-z0-9._/-]{1,120}$/;
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
 const QUOTE_TTL_MS = 30 * 1000;
@@ -110,10 +111,12 @@ export function createHandler({
     const nonce = String(body.nonce || "");
     const invoiceReference = String(body.invoiceReference || "");
     const amountUsdCents = body.amountUsdCents;
-    const signatureB64 = String(body.signature || "");
+    const keyId = String(req.headers?.["x-t2t-key-id"] || "");
+    const signatureB64 = String(req.headers?.["x-t2t-signature"] || "");
 
     if (
       !TERMINAL_ID_RE.test(terminalId) ||
+      !KEY_ID_RE.test(keyId) ||
       !Number.isSafeInteger(timestamp) ||
       Math.abs(now() - timestamp) > MAX_CLOCK_SKEW_MS ||
       !NONCE_RE.test(nonce) ||
@@ -147,7 +150,8 @@ export function createHandler({
     }
 
     const canonicalRequest = [
-      "T2T_PAYMENT_QUOTE_REQUEST_V1",
+      "T2T_S2S_PAYMENT_QUOTE_V1",
+      keyId,
       terminalId,
       timestamp,
       nonce,
@@ -171,12 +175,12 @@ export function createHandler({
       client = await poolProvider().connect();
       const initial = await client.query(
         `SELECT public_key_base64
-           FROM public.t2t_trusted_terminals
-          WHERE terminal_id = $1 AND status = 'ACTIVE'`,
-        [terminalId]
+           FROM public.t2t_s2s_client_keys
+          WHERE key_id = $1 AND status = 'ACTIVE'`,
+        [keyId]
       );
       if (initial.rowCount !== 1) {
-        return res.status(401).json({ error: "Terminal not trusted" });
+        return res.status(401).json({ error: "S2S client not trusted" });
       }
 
       const verifyTerminalSignature = publicKeyBase64 => {
@@ -252,10 +256,10 @@ export function createHandler({
       inTransaction = true;
       const trusted = await client.query(
         `SELECT public_key_base64
-           FROM public.t2t_trusted_terminals
-          WHERE terminal_id = $1 AND status = 'ACTIVE'
+           FROM public.t2t_s2s_client_keys
+          WHERE key_id = $1 AND status = 'ACTIVE'
           FOR UPDATE`,
-        [terminalId]
+        [keyId]
       );
       if (
         trusted.rowCount !== 1 ||
@@ -263,13 +267,13 @@ export function createHandler({
       ) {
         await client.query("ROLLBACK");
         inTransaction = false;
-        return res.status(401).json({ error: "Terminal trust changed" });
+        return res.status(401).json({ error: "S2S client trust changed" });
       }
 
       await client.query(
-        `INSERT INTO public.t2t_heartbeat_nonces (terminal_id, nonce)
+        `INSERT INTO public.t2t_s2s_request_nonces (key_id, nonce)
          VALUES ($1, $2)`,
-        [terminalId, nonce]
+        [keyId, nonce]
       );
       await client.query("COMMIT");
       inTransaction = false;
