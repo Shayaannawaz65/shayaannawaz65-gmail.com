@@ -24,7 +24,8 @@ button{margin-top:10px;padding:10px 14px;border:1px solid #536681;border-radius:
 <h1>Pay with USDT</h1>
 <p>TRON network (TRC20) only. Send the exact amount to the address below.</p>
 <div class="label">Payment status</div><p><span id="status">Loading…</span></p>
-<div class="label">USDT amount</div><div class="amount" id="amount">—</div>
+<div class="label">Invoice amount (USD)</div><div class="amount" id="usdAmount">—</div>
+<div class="label">Exact payment amount (USDT)</div><div class="amount" id="amount">—</div>
 <button id="copyAmount" type="button">Copy amount</button>
 <div class="label">Receiving address</div><div class="value" id="address">—</div>
 <button id="copyAddress" type="button">Copy address</button>
@@ -40,6 +41,13 @@ button{margin-top:10px;padding:10px 14px;border:1px solid #536681;border-radius:
   let amount = "";
   let address = "";
   let stopped = false;
+
+  function formatUsdCents(cents) {
+    if (!/^\d{1,78}$/.test(String(cents))) return "Unavailable";
+    const digits = String(cents).padStart(3, "0");
+    const whole = digits.slice(0, -2).replace(/^0+(?=\d)/, "");
+    return "$" + whole + "." + digits.slice(-2);
+  }
 
   async function copy(value) {
     if (!value) return;
@@ -77,6 +85,7 @@ button{margin-top:10px;padding:10px 14px;border:1px solid #536681;border-radius:
 
       amount = formatRaw(data.amountUsdtRaw);
       address = data.receiverAddress;
+      el("usdAmount").textContent = formatUsdCents(data.amountUsdCents);
       el("amount").textContent = amount + " USDT";
       el("address").textContent = address;
       el("invoice").textContent = data.invoiceReference;
