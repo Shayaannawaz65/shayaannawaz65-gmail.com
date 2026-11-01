@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { createHandler } from "../api/console/payment-orders.mjs";
+import { buildWhatsappShareUrl, createHandler } from "../api/console/payment-orders.mjs";
 import {
   buildPaymentQuoteCanonical,
   calculateUsdtRaw
@@ -254,4 +254,17 @@ test("valid signed order inserts a pending order using mock database", async () 
   assert.equal(insert.params[1], keyId);
   assert.equal(insert.params[5].includes("070707"), false);
   assert.deepEqual(JSON.parse(insert.params[10]), quoteMetadata);
+});
+
+
+test("builds a WhatsApp share link for the customer with an encoded payment message", () => {
+  const url = buildWhatsappShareUrl("+97455551234", "T2T invoice INV-1\\nUSD 12.50\\nhttps://t2t.example/pay");
+  assert.equal(
+    url,
+    "https://wa.me/97455551234?text=T2T%20invoice%20INV-1%0AUSD%2012.50%0Ahttps%3A%2F%2Ft2t.example%2Fpay"
+  );
+});
+
+test("rejects WhatsApp numbers that are not E.164", () => {
+  assert.throws(() => buildWhatsappShareUrl("55551234", "Payment link"), /Invalid WhatsApp number/);
 });
