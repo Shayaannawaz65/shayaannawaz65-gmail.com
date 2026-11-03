@@ -16,6 +16,7 @@ import tronHealth from "../lib/routes/tron/health.mjs";
 import tronProviderHealth from "../lib/routes/tron/provider-health.mjs";
 import tronSync from "../lib/routes/tron/sync.mjs";
 import nowpaymentsIpn from "../lib/routes/nowpayments/ipn.mjs";
+import paymentReceipts from "../lib/routes/console/payment-receipts.mjs";
 
 const routes = new Map([
   ["console/heartbeat", heartbeat],
@@ -24,6 +25,7 @@ const routes = new Map([
   ["console/payment-quote", paymentQuote],
   ["console/payment-quote-issuer", paymentQuote],
   ["console/payment-status", paymentStatus],
+  ["console/payment-receipts", paymentReceipts],
   ["console/s2s-client-admin", s2sClientAdmin],
   ["console/s2s-client-ip-allowlist", s2sClientIpAllowlist],
   ["console/s2s-terminal-access", s2sTerminalAccess],
