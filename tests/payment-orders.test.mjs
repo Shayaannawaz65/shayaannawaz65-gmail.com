@@ -139,6 +139,10 @@ function mockPool({ trusted = true, authorized = true } = {}) {
             return { rowCount: 1, rows: [] };
           }
 
+          if (sql.includes("UPDATE public.t2t_payment_orders")) {
+            return { rowCount: 1, rows: [] };
+          }
+
           if (sql.includes("INSERT INTO public.t2t_payment_orders")) {
             state.inserted = true;
             return {
@@ -255,10 +259,15 @@ test("valid signed order inserts a pending order using mock database", async () 
       async createCheckout(input) {
         assert.equal(input.amount, 12.5);
         assert.equal(input.currency, "usd");
+        assert.equal(input.payCurrency, "usdttrc20");
         assert.equal(input.orderId, "00000000-0000-4000-8000-000000000001");
         return {
           id: "np-invoice-test-001",
-          invoice_url: "https://nowpayments.io/payment/?iid=np-invoice-test-001"
+          invoice_url: "https://nowpayments.io/payment/?iid=np-invoice-test-001",
+          order_id: "00000000-0000-4000-8000-000000000001",
+          price_currency: "usd",
+          pay_currency: "usdttrc20",
+          price_amount: 12.5
         };
       }
     })
