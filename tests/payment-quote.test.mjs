@@ -26,7 +26,9 @@ const rateMetadata = {
   coingeckoUpdatedAt: now - 2000,
   referencePriceUsdPerUsdt: "0.9999",
   observedAt: now,
-  maxAgeMs: 30000,
+  maxKrakenAgeMs: 30000,
+  maxCoinGeckoAgeMs: 120000,
+  maxFutureSkewMs: 5000,
   maxDivergenceBps: 50
 };
 

@@ -4,14 +4,18 @@ import paymentOrders from "../lib/routes/console/payment-orders.mjs";
 import paymentQuote from "../lib/routes/console/payment-quote-issuer.mjs";
 import paymentStatus from "../lib/routes/console/payment-status.mjs";
 import s2sClientAdmin from "../lib/routes/console/s2s-client-admin.mjs";
+import s2sClientIpAllowlist from "../lib/routes/console/s2s-client-ip-allowlist.mjs";
 import s2sTerminalAccess from "../lib/routes/console/s2s-terminal-access.mjs";
 import s2sTerminalAudit from "../lib/routes/console/s2s-terminal-audit.mjs";
+import terminalAdmin from "../lib/routes/console/terminal-admin.mjs";
+import m1SettlementAdmin from "../lib/routes/console/m1-settlement-admin.mjs";
 import consoleStatus from "../lib/routes/console/status.mjs";
 import transactions from "../lib/routes/console/transactions.mjs";
 import tronDbHealth from "../lib/routes/tron/db-health.mjs";
 import tronHealth from "../lib/routes/tron/health.mjs";
 import tronProviderHealth from "../lib/routes/tron/provider-health.mjs";
 import tronSync from "../lib/routes/tron/sync.mjs";
+import nowpaymentsIpn from "../lib/routes/nowpayments/ipn.mjs";
 
 const routes = new Map([
   ["console/heartbeat", heartbeat],
@@ -21,15 +25,21 @@ const routes = new Map([
   ["console/payment-quote-issuer", paymentQuote],
   ["console/payment-status", paymentStatus],
   ["console/s2s-client-admin", s2sClientAdmin],
+  ["console/s2s-client-ip-allowlist", s2sClientIpAllowlist],
   ["console/s2s-terminal-access", s2sTerminalAccess],
   ["console/s2s-terminal-audit", s2sTerminalAudit],
+  ["console/terminal-admin", terminalAdmin],
+  ["console/m1-settlement-admin", m1SettlementAdmin],
   ["console/status", consoleStatus],
   ["console/transactions", transactions],
   ["tron/db-health", tronDbHealth],
   ["tron/health", tronHealth],
   ["tron/provider-health", tronProviderHealth],
-  ["tron/sync", tronSync]
+  ["tron/sync", tronSync],
+  ["nowpayments/ipn", nowpaymentsIpn]
 ]);
+
+export const API_ROUTE_PATHS = Object.freeze([...routes.keys()]);
 
 export default async function handler(req, res) {
   const raw = req.query?.route ?? req.params?.splat;

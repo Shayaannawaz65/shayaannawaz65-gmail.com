@@ -70,7 +70,8 @@ test("accepts two fresh independent observations and produces exact inverse rate
   assert.equal(result.rateNumerator, "2000000000000");
   assert.equal(result.rateDenominator, "1999800000000");
   assert.equal(result.metadata.referencePriceUsdPerUsdt, "0.9999");
-  assert.equal(result.metadata.maxAgeMs, 30000);
+  assert.equal(result.metadata.maxKrakenAgeMs, 30000);
+  assert.equal(result.metadata.maxCoinGeckoAgeMs, 120000);
   assert.equal(result.metadata.maxDivergenceBps, 50);
 });
 
@@ -87,7 +88,7 @@ test("rejects stale Kraken trade data", () => {
 test("rejects stale CoinGecko update data", () => {
   assert.throws(
     () => buildValidatedRate({
-      ...pair({ coingeckoAge: 30_001 }),
+      ...pair({ coingeckoAge: 120_001 }),
       now: NOW
     }),
     /CoinGecko price is stale/i
@@ -182,7 +183,8 @@ test("fails closed when a provider returns a non-success response", async () => 
 
 test("keeps the approved freshness and divergence guardrails", () => {
   assert.deepEqual(RATE_LIMITS, {
-    maxAgeMs: 30000,
+    maxKrakenAgeMs: 30000,
+    maxCoinGeckoAgeMs: 120000,
     maxFutureSkewMs: 5000,
     maxDivergenceBps: 50
   });

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { createHandler } from "../api/console/heartbeat.mjs";
+import { createHandler } from "../lib/routes/console/heartbeat.mjs";
 
 function makeResponse() {
   return {
@@ -51,6 +51,10 @@ function mockPool({ trusted = true } = {}) {
     async connect() {
       return {
         async query(sql, params = []) {
+          if (sql.includes("INSERT INTO public.t2t_s2s_rate_limits")) {
+            return { rowCount: 1, rows: [{ request_count: 1 }] };
+          }
+
           if (sql.includes("SELECT public_key_base64")) {
             return trusted
               ? { rowCount: 1, rows: [{ public_key_base64: publicKeyBase64 }] }

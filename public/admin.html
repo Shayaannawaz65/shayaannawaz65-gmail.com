@@ -102,6 +102,75 @@ nav a{color:#c6f36b;margin-right:16px}
 </section>
 
 <section class="panel">
+  <h2>Merchant and S2S client status</h2>
+  <button id="refreshClients" type="button">Refresh clients</button>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Client</th><th>Type</th><th>Status</th><th>Active keys</th><th>Key status</th><th>Created</th></tr></thead>
+      <tbody id="clients"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Registered Android terminals</h2>
+  <button id="refreshTerminals" type="button">Refresh terminals</button>
+  <label for="terminalAdminId">Terminal ID</label>
+  <input id="terminalAdminId" maxlength="100" autocomplete="off" placeholder="OFFLINE-201.3-001">
+  <label for="terminalAdminAction">Action</label>
+  <select id="terminalAdminAction">
+    <option value="register">Register new terminal</option>
+    <option value="rotate_key">Rotate terminal public key</option>
+    <option value="revoke">Revoke terminal trust</option>
+  </select>
+  <label for="terminalAdminPublicKey">Terminal P-256 public key (Base64 DER/SPKI; registration/rotation only)</label>
+  <textarea id="terminalAdminPublicKey" rows="3" spellcheck="false" autocomplete="off"
+    placeholder="Paste the terminal public key only; never paste a private key"></textarea>
+  <button id="saveTerminal" type="button">Apply terminal action</button>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Terminal</th><th>Trust</th><th>Connectivity</th><th>Last heartbeat</th><th>Active S2S keys</th></tr></thead>
+      <tbody id="terminals"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Merchant source IP allowlist</h2>
+  <p class="muted">Only active MERCHANT clients are subject to this rule. POS terminal heartbeat and POS S2S requests are not changed. Configure only merchant-provided source networks.</p>
+  <label for="ipClientId">Merchant client ID</label>
+  <input id="ipClientId" maxlength="128" autocomplete="off" placeholder="Registered MERCHANT client ID">
+  <label for="ipNetwork">IP address or CIDR</label>
+  <input id="ipNetwork" maxlength="80" autocomplete="off" placeholder="Merchant-provided IPv4 or IPv6 network">
+  <div>
+    <button id="addIp" type="button">Allow network</button>
+    <button id="refreshIp" type="button" class="secondary">Refresh allowlist</button>
+  </div>
+  <p id="ipMessage" role="status" class="muted">No allowlist loaded.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Network</th><th>Status</th><th>Created by</th><th>Updated</th><th>Action</th></tr></thead>
+      <tbody id="ipEntries"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Observed TRON deposit transaction feed</h2>
+  <p class="muted">Read-only confirmed observations from the database. This does not initiate synchronization, approve deposits, or authorize settlement.</p>
+  <label for="feedToken">Operations feed token</label>
+  <input id="feedToken" type="password" autocomplete="off" minlength="32" placeholder="Enter configured feed token">
+  <button id="refreshTransactions" type="button">Load transaction history</button>
+  <p id="feedMessage" role="status" class="muted">Not loaded.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Observed at</th><th>Transaction</th><th>Event</th><th>Amount USDT</th><th>Receiver</th><th>Status</th></tr></thead>
+      <tbody id="transactions"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
   <h2>Terminal authorization</h2>
   <p class="muted">Grant requires both the S2S key and terminal to be ACTIVE. Revoke remains available if either parent is inactive.</p>
   <label for="keyId">S2S key ID</label>
@@ -183,6 +252,12 @@ nav a{color:#c6f36b;margin-right:16px}
     $("token").value = "";
     $("audit").replaceChildren();
     $("clientAudit").replaceChildren();
+    $("clients").replaceChildren();
+    $("terminals").replaceChildren();
+    $("terminalAdminPublicKey").value = "";
+    $("ipEntries").replaceChildren();
+    $("transactions").replaceChildren();
+    $("feedToken").value = "";
     $("page").textContent = "";
     $("clientAuditPage").textContent = "";
     message("Disconnected. Token cleared from page memory.");
@@ -252,6 +327,173 @@ nav a{color:#c6f36b;margin-right:16px}
     }
   }
 
+  async function loadClients() {
+    if (!token) return;
+    try {
+      const data = await request(`/api/console/s2s-client-admin?view=clients&limit=${limit}&offset=0`);
+      const body = $("clients");
+      body.replaceChildren();
+      for (const item of data.records || []) {
+        const tr = document.createElement("tr");
+        addCell(tr, item.client_id);
+        addCell(tr, item.client_type);
+        addCell(tr, item.status);
+        addCell(tr, item.active_key_count);
+        addCell(tr, (item.keys || []).map(key => `${key.keyId}: ${key.status}`).join("\n") || "No registered keys");
+        addCell(tr, date(item.created_at));
+        body.appendChild(tr);
+      }
+    } catch (error) {
+      message(error.message || "Client status unavailable.", true);
+    }
+  }
+
+  async function loadTerminals() {
+    if (!token) return;
+    try {
+      const data = await request(`/api/console/s2s-client-admin?view=terminals&limit=${limit}&offset=0`);
+      const body = $("terminals");
+      body.replaceChildren();
+      for (const item of data.records || []) {
+        const tr = document.createElement("tr");
+        addCell(tr, item.terminalId);
+        addCell(tr, item.status);
+        addCell(tr, item.connectivity);
+        addCell(tr, date(item.lastSeenAt));
+        addCell(tr, item.activeKeyCount);
+        body.appendChild(tr);
+      }
+    } catch (error) {
+      message(error.message || "Terminal status unavailable.", true);
+    }
+  }
+
+  async function administerTerminal() {
+    if (!token) {
+      message("Connect first using the admin token.", true);
+      return;
+    }
+    const action = $("terminalAdminAction").value;
+    const terminalId = $("terminalAdminId").value.trim();
+    const publicKeyBase64 = $("terminalAdminPublicKey").value.replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(terminalId)) {
+      message("Enter a valid terminal ID.", true);
+      return;
+    }
+    if ((action === "register" || action === "rotate_key") && !publicKeyBase64) {
+      message("A terminal P-256 public key is required for this action.", true);
+      return;
+    }
+    const confirmation = action === "register" ?
+      `Register terminal ${terminalId} with the supplied public key?` :
+      action === "rotate_key" ?
+        `Replace the trusted public key for ${terminalId} and activate it?` :
+        `Revoke heartbeat trust for ${terminalId}?`;
+    if (!window.confirm(confirmation)) return;
+    try {
+      const data = await request("/api/console/terminal-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, terminalId, publicKeyBase64 })
+      });
+      message(`${data.action} completed for ${data.terminalId}.`);
+      await loadTerminals();
+    } catch (error) {
+      message(error.message || "Terminal administration failed.", true);
+    }
+  }
+
+  async function loadIpAllowlist() {
+    if (!token) {
+      $("ipMessage").textContent = "Connect with the S2S admin token first.";
+      return;
+    }
+    const clientId = $("ipClientId").value.trim();
+    if (!clientId) {
+      $("ipMessage").textContent = "Enter a registered MERCHANT client ID.";
+      return;
+    }
+    try {
+      const data = await request(`/api/console/s2s-client-ip-allowlist?clientId=${encodeURIComponent(clientId)}`);
+      const body = $("ipEntries");
+      body.replaceChildren();
+      for (const item of data.records || []) {
+        const tr = document.createElement("tr");
+        addCell(tr, item.network);
+        addCell(tr, item.status);
+        addCell(tr, item.created_by);
+        addCell(tr, date(item.updated_at));
+        const td = document.createElement("td");
+        if (item.status === "ACTIVE") {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "danger";
+          button.textContent = "Revoke";
+          button.addEventListener("click", () => changeIpAllowlist("revoke", item.network));
+          td.appendChild(button);
+        }
+        tr.appendChild(td);
+        body.appendChild(tr);
+      }
+      $("ipMessage").textContent = `${data.records.length} persisted network rule(s) for ${clientId}.`;
+    } catch (error) {
+      $("ipMessage").textContent = error.message || "Allowlist unavailable.";
+    }
+  }
+
+  async function changeIpAllowlist(action, network = $("ipNetwork").value.trim()) {
+    if (!token) {
+      $("ipMessage").textContent = "Connect with the S2S admin token first.";
+      return;
+    }
+    const clientId = $("ipClientId").value.trim();
+    if (action === "revoke" && !window.confirm(`Revoke ${network} for ${clientId}?`)) return;
+    try {
+      const data = await request("/api/console/s2s-client-ip-allowlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, clientId, network })
+      });
+      $("ipMessage").textContent = `${action} completed for ${data.entry.network}.`;
+      await loadIpAllowlist();
+    } catch (error) {
+      $("ipMessage").textContent = error.message || "Allowlist update failed.";
+    }
+  }
+
+  async function loadTransactions() {
+    const feedToken = $("feedToken").value;
+    if (feedToken.length < 32) {
+      $("feedMessage").textContent = "Enter the configured operations feed token.";
+      return;
+    }
+    $("feedMessage").textContent = "Loading persisted TRON observations…";
+    try {
+      const response = await fetch("/api/console/transactions?limit=50&offset=0", {
+        headers: { Authorization: `Bearer ${feedToken}`, Accept: "application/json" },
+        cache: "no-store",
+        credentials: "same-origin"
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      const body = $("transactions");
+      body.replaceChildren();
+      for (const item of data.records || []) {
+        const tr = document.createElement("tr");
+        addCell(tr, date(item.block_timestamp));
+        addCell(tr, item.transaction_id);
+        addCell(tr, item.event_index);
+        addCell(tr, item.amount_usdt);
+        addCell(tr, item.receiver_address);
+        addCell(tr, item.observation_status);
+        body.appendChild(tr);
+      }
+      $("feedMessage").textContent = `${data.records?.length || 0} persisted observation(s). Read-only; no sync or settlement run.`;
+    } catch (error) {
+      $("feedMessage").textContent = error.message || "Transaction feed unavailable.";
+    }
+  }
+
   async function clientAction(payload, confirmation) {
     if (!token || busy) {
       message("Connect first using the admin token.", true);
@@ -272,6 +514,7 @@ nav a{color:#c6f36b;margin-right:16px}
       clientAuditOffset = 0;
       busy = false;
       await clientAudit();
+      await loadClients();
     } catch (error) {
       message(error.message || "Client administration failed.", true);
     } finally {
@@ -370,12 +613,20 @@ nav a{color:#c6f36b;margin-right:16px}
     offset = 0;
     await audit();
     await clientAudit();
+    await loadClients();
+    await loadTerminals();
   });
   $("disconnect").addEventListener("click", disconnect);
   $("grant").addEventListener("click", () => changeAccess("grant"));
   $("revoke").addEventListener("click", () => changeAccess("revoke"));
   $("refresh").addEventListener("click", () => { offset = 0; audit(); });
   $("older").addEventListener("click", () => { offset += limit; audit(); });
+  $("refreshClients").addEventListener("click", loadClients);
+  $("refreshTerminals").addEventListener("click", loadTerminals);
+  $("saveTerminal").addEventListener("click", administerTerminal);
+  $("refreshIp").addEventListener("click", loadIpAllowlist);
+  $("addIp").addEventListener("click", () => changeIpAllowlist("allow"));
+  $("refreshTransactions").addEventListener("click", loadTransactions);
 })();
 </script>
 </body>

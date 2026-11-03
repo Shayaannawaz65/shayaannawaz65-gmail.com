@@ -1,4 +1,4 @@
-import { normalizeTronAddress } from "../api/tron/address.mjs";
+import { normalizeTronAddress } from "../lib/routes/tron/address.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -6,7 +6,7 @@ import {
   amountUsdt,
   authorized,
   resolveActiveReceiver
-} from "../api/tron/sync.mjs";
+} from "../lib/routes/tron/sync.mjs";
 
 test("accepts the official USDT TRC20 contract address", () => {
   const address = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
@@ -53,8 +53,8 @@ test("authorizes only a matching Bearer token", () => {
   assert.equal(authorized({ headers: {} }, expected), false);
 });
 
-import handler from "../api/tron/sync.mjs";
-import { createHandler } from "../api/tron/sync.mjs";
+import handler from "../lib/routes/tron/sync.mjs";
+import { createHandler } from "../lib/routes/tron/sync.mjs";
 
 test("rejects non-POST requests before accessing configuration or database", async () => {
   const headers = {};
@@ -603,6 +603,7 @@ test("confirms a uniquely matched payment order when the database updates one ro
   let cursor = null;
   const depositInserts = [];
   const queries = [];
+  const receiptBridgeRows = [];
   let transferTimestamp = null;
 
   const txid = "a".repeat(64);
@@ -693,6 +694,12 @@ test("confirms a uniquely matched payment order when the database updates one ro
   };
 
   const testHandler = createHandler({
+    receiptLedgerBridge: {
+      async recordConfirmedDeposit(row) {
+        assert.ok(commits > 0, "receipt evidence bridge runs after the deposit transaction commits");
+        receiptBridgeRows.push(row);
+      }
+    },
     receiverResolver: async () => process.env.T2T_TRON_RECEIVER_ADDRESS,
     jwtFactory: () => "test-only-jwt",
     poolProvider: () => ({ connect: async () => client }),
@@ -790,6 +797,10 @@ test("confirms a uniquely matched payment order when the database updates one ro
     assert.equal(rollbacks, 0);
     assert.equal(releaseQueries, 1);
     assert.equal(responseBody.new_events, 1);
+    assert.equal(responseBody.receipt_ledger_events, 1);
+    assert.equal(receiptBridgeRows.length, 1);
+    assert.equal(receiptBridgeRows[0].observation_status, "OBSERVED_CONFIRMED");
+    assert.equal(receiptBridgeRows[0].transaction_id, txid);
     assert.equal(responseBody.auto_approval, false);
     assert.ok(cursor);
     assert.ok(

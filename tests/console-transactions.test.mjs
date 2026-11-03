@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTransactionsHandler } from "../api/console/transactions.mjs";
+import { createTransactionsHandler } from "../lib/routes/console/transactions.mjs";
 
 const token = "transactions-feed-test-token";
 const env = { T2T_CONSOLE_FEED_TOKEN: token };

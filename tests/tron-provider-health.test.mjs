@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createProviderHealthHandler } from "../api/tron/provider-health.mjs";
+import { createProviderHealthHandler } from "../lib/routes/tron/provider-health.mjs";
 
 function makeResponse() {
   return {

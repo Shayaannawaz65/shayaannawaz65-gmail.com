@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { createHandler } from "../api/console/payment-quote-issuer.mjs";
+import { createHandler } from "../lib/routes/console/payment-quote-issuer.mjs";
 
 const NOW = 1_800_000_000_000;
 const terminalId = "OFFLINE-201.3-001";
@@ -48,7 +48,9 @@ const marketRate = {
     coingeckoUpdatedAt: NOW - 2000,
     referencePriceUsdPerUsdt: "0.9999",
     observedAt: NOW,
-    maxAgeMs: 30000,
+    maxKrakenAgeMs: 30000,
+    maxCoinGeckoAgeMs: 120000,
+    maxFutureSkewMs: 5000,
     maxDivergenceBps: 50
   }
 };
@@ -75,9 +77,10 @@ function makeRequest(overrides = {}) {
   };
 
   const canonical = [
-    "T2T_S2S_PAYMENT_QUOTE_V1",
+    "T2T_S2S_PAYMENT_QUOTE_V2",
     keyId,
-    body.terminalId,
+    "merchant-client-001",
+    body.terminalId || "",
     body.timestamp,
     body.nonce,
     body.invoiceReference,
@@ -88,7 +91,7 @@ function makeRequest(overrides = {}) {
   return { method: "POST", headers: { "x-t2t-key-id": keyId, "x-t2t-signature": signature }, body };
 }
 
-function mockPool({ duplicateNonce = false } = {}) {
+function mockPool({ duplicateNonce = false, trusted = true, authorized = true } = {}) {
   const queries = [];
   let connectCount = 0;
   let releaseCount = 0;
@@ -96,11 +99,27 @@ function mockPool({ duplicateNonce = false } = {}) {
     async query(sql, params = []) {
       queries.push({ sql, params });
 
-      if (sql.includes("SELECT public_key_base64")) {
-        return {
-          rowCount: 1,
-          rows: [{ public_key_base64: terminalPublicKeyBase64 }]
-        };
+      if (sql.includes("INSERT INTO public.t2t_s2s_rate_limits")) {
+        return { rowCount: 1, rows: [{ request_count: 1 }] };
+      }
+
+      if (sql.includes("SELECT c.client_id, c.client_type")) {
+        return trusted
+          ? {
+              rowCount: 1,
+              rows: [{
+                client_id: "merchant-client-001",
+                client_type: "POS",
+                public_key_base64: terminalPublicKeyBase64
+              }]
+            }
+          : { rowCount: 0, rows: [] };
+      }
+
+      if (sql.includes("SELECT t.terminal_id")) {
+        return authorized
+          ? { rowCount: 1, rows: [{ terminal_id: terminalId }] }
+          : { rowCount: 0, rows: [] };
       }
 
       if (sql.includes("INSERT INTO public.t2t_s2s_request_nonces")) {
@@ -228,4 +247,32 @@ test("rejects a replayed nonce with HTTP 409", async () => {
 
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.error, "Quote request replay rejected");
+});
+
+
+test("rejects a terminal not authorized for the S2S key", async () => {
+  const db = mockPool({ trusted: true, authorized: false });
+  const res = response();
+  let rateRequested = false;
+
+  await createHandler({
+    poolProvider: db.poolProvider,
+    env,
+    now: () => NOW,
+    rateProvider: async () => {
+      rateRequested = true;
+      return marketRate;
+    }
+  })(makeRequest(), res);
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.error, "S2S client or key not trusted");
+  assert.equal(rateRequested, false);
+  assert.equal(db.connectCount, 1);
+  assert.ok(db.queries.some(q =>
+    q.sql.includes("JOIN public.t2t_s2s_key_terminals auth")
+  ));
+  assert.ok(!db.queries.some(q =>
+    q.sql.includes("INSERT INTO public.t2t_s2s_request_nonces")
+  ));
 });

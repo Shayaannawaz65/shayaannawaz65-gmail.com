@@ -18,3 +18,5 @@ backups/
 
 # Local cryptographic keys
 .local-keys/
+.env.cm.local
+.env.m1.local

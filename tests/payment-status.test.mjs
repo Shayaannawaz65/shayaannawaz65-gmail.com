@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { createHandler } from "../api/console/payment-status.mjs";
+import { createHandler } from "../lib/routes/console/payment-status.mjs";
 
 function makeResponse() {
   return {

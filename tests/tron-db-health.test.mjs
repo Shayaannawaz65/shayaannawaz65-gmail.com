@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDbHealthHandler } from "../api/tron/db-health.mjs";
+import { createDbHealthHandler } from "../lib/routes/tron/db-health.mjs";
 
 function makeResponse() {
   return {

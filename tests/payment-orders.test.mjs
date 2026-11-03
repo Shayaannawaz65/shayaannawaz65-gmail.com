@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { createHandler } from "../api/console/payment-orders.mjs";
+import { createHandler } from "../lib/routes/console/payment-orders.mjs";
 import {
   buildPaymentQuoteCanonical,
   calculateUsdtRaw
@@ -52,7 +52,9 @@ const quoteMetadata = {
   coingeckoUpdatedAt: now - 2000,
   referencePriceUsdPerUsdt: "0.9999",
   observedAt: now,
-  maxAgeMs: 30000,
+  maxKrakenAgeMs: 30000,
+  maxCoinGeckoAgeMs: 120000,
+  maxFutureSkewMs: 5000,
   maxDivergenceBps: 50
 };
 
@@ -62,6 +64,7 @@ function makeBody(overrides = {}) {
     timestamp: now,
     nonce,
     invoiceReference: "INV-TEST-001",
+    customerWhatsappNumber: "+15551234567",
     amountUsdCents: 1250,
     amountUsdtRaw: calculateUsdtRaw(
       1250, quoteRateNumerator, quoteRateDenominator
@@ -73,7 +76,7 @@ function makeBody(overrides = {}) {
   const quoteExpiresAt = now + 30_000;
   const quoteCanonical = buildPaymentQuoteCanonical({
     quoteId,
-    terminalId: fields.terminalId,
+    clientId: "merchant-client-001",
     invoiceReference: fields.invoiceReference,
     amountUsdCents: fields.amountUsdCents,
     rateNumerator: quoteRateNumerator,
@@ -100,7 +103,7 @@ function makeBody(overrides = {}) {
   };
 }
 
-function mockPool({ trusted = true } = {}) {
+function mockPool({ trusted = true, authorized = true } = {}) {
   const state = { queries: [], committed: false, inserted: false };
 
   return {
@@ -108,16 +111,28 @@ function mockPool({ trusted = true } = {}) {
     async connect() {
       return {
         async query(sql, params = []) {
+          if (sql.includes("INSERT INTO public.t2t_s2s_rate_limits")) {
+            return { rowCount: 1, rows: [{ request_count: 1 }] };
+          }
+
           state.queries.push({ sql, params });
 
-          if (sql.includes("SELECT t.terminal_id")) {
+          if (sql.includes("SELECT c.client_id, c.client_type")) {
             return trusted
               ? {
                   rowCount: 1,
                   rows: [{
-                    merchant_public_key_base64: publicKeyBase64
+                    client_id: "merchant-client-001",
+                    client_type: "POS",
+                    public_key_base64: publicKeyBase64
                   }]
                 }
+              : { rowCount: 0, rows: [] };
+          }
+
+          if (sql.includes("SELECT t.terminal_id")) {
+            return trusted && authorized
+              ? { rowCount: 1, rows: [{ terminal_id: terminalId }] }
               : { rowCount: 0, rows: [] };
           }
 
@@ -131,10 +146,10 @@ function mockPool({ trusted = true } = {}) {
               rowCount: 1,
               rows: [{
                 order_id: "00000000-0000-4000-8000-000000000001",
-                invoice_reference: params[2],
-                amount_usd_cents: params[3],
-                amount_usdt_raw: params[4],
-                receiver_address: params[5],
+                invoice_reference: params[3],
+                amount_usd_cents: params[4],
+                amount_usdt_raw: params[5],
+                receiver_address: params[6],
                 expires_at: new Date(now + 900000),
                 status: "PENDING"
               }]
@@ -152,14 +167,17 @@ function mockPool({ trusted = true } = {}) {
 
 const env = {
   T2T_PAYMENT_BASE_URL: "https://payments.example.test",
-  T2T_TRON_RECEIVER_ADDRESS: "TExAW9464LvbWmAsbcmNhvHQwawUn8rmN2",
-  T2T_EXCHANGE_QUOTE_PUBLIC_KEY: quotePublicKeyBase64
+  T2T_TRON_RECEIVER_ADDRESS: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+  T2T_EXCHANGE_QUOTE_PUBLIC_KEY: quotePublicKeyBase64,
+  NOWPAYMENTS_API_KEY: "test-api-key",
+  NOWPAYMENTS_IPN_SECRET: "test-ipn-secret",
+  NOWPAYMENTS_IPN_CALLBACK_URL: "https://payments.example.test/api/nowpayments/ipn"
 };
 
 function signedHeaders(body, signatureOverride) {
   const q = body.quote;
   const metadataHash = crypto.createHash("sha256").update(JSON.stringify(q?.rateMetadata ?? null)).digest("hex");
-  const canonical = ["T2T_S2S_PAYMENT_ORDER_V1", keyId, body.terminalId, body.timestamp, body.nonce, body.invoiceReference, body.amountUsdCents, body.amountUsdtRaw, body.expiresInSeconds, String(q?.quoteId || ""), String(q?.rateNumerator || ""), String(q?.rateDenominator || ""), String(q?.expiresAt || ""), String(q?.signature || ""), metadataHash].join("\n");
+  const canonical = ["T2T_S2S_PAYMENT_ORDER_V2", keyId, "merchant-client-001", body.terminalId || "", body.timestamp, body.nonce, body.invoiceReference, body.customerWhatsappNumber, String(body.amountUsdCents), body.amountUsdtRaw, body.expiresInSeconds, String(q?.quoteId || ""), String(q?.rateNumerator || ""), String(q?.rateDenominator || ""), String(q?.expiresAt || ""), String(q?.signature || ""), metadataHash].join("\n");
   return {"x-t2t-key-id":keyId,"x-t2t-signature":signatureOverride || crypto.sign("sha256",Buffer.from(canonical),privateKey).toString("base64")};
 }
 
@@ -202,7 +220,7 @@ test("rejects an untrusted terminal", async () => {
     now: () => now
   })({ method: "POST", headers: signedHeaders(makeBody()), body: makeBody() }, res);
 
-  assert.equal(res.statusCode, 401);
+  assert.equal(res.statusCode, 401, JSON.stringify(res.body));
   assert.equal(pool.state.inserted, false);
 });
 
@@ -227,22 +245,36 @@ test("rejects invalid signature without creating an order", async () => {
 test("valid signed order inserts a pending order using mock database", async () => {
   const pool = mockPool();
   const res = makeResponse();
+  const body = makeBody();
 
   await createHandler({
     poolProvider: () => pool,
     env,
     now: () => now,
-    randomBytes: size => Buffer.alloc(size, 7)
-  })({ method: "POST", headers: signedHeaders(makeBody()), body: makeBody() }, res);
+    randomBytes: size => Buffer.alloc(size, 7),
+    sdkProvider: () => ({
+      async createCheckout(input) {
+        assert.equal(input.amount, 12.5);
+        assert.equal(input.currency, "usd");
+        assert.equal(input.orderId, "00000000-0000-4000-8000-000000000001");
+        return {
+          id: "np-invoice-test-001",
+          invoice_url: "https://nowpayments.io/payment/?iid=np-invoice-test-001"
+        };
+      }
+    })
+  })({ method: "POST", headers: signedHeaders(body), body }, res);
 
-  assert.equal(res.statusCode, 201);
+  assert.equal(res.statusCode, 201, JSON.stringify(res.body));
   assert.equal(res.body.status, "PENDING");
   assert.equal("merchantId" in res.body, false);
   assert.equal("receiverId" in res.body, false);
   assert.equal(res.body.currency, "USD");
-  assert.equal(res.body.amountUsdCents, 1250);
+  assert.equal(res.body.amountUsdCents, "1250");
   assert.equal(res.body.amountUsdtRaw, "12501250");
-  assert.match(res.body.paymentUrl, /^https:\/\/payments\.example\.test\/pay\.html\?token=[A-Za-z0-9_-]{43}$/);
+  assert.equal(res.body.provider, "NOWPAYMENTS");
+  assert.equal(res.body.providerInvoiceId, "np-invoice-test-001");
+  assert.equal(res.body.paymentUrl, "https://nowpayments.io/payment/?iid=np-invoice-test-001");
   assert.equal(pool.state.inserted, true);
   assert.equal(pool.state.committed, true);
 
@@ -250,8 +282,32 @@ test("valid signed order inserts a pending order using mock database", async () 
     q.sql.includes("INSERT INTO public.t2t_payment_orders")
   );
   assert.ok(insert);
-  assert.equal(insert.params[6].length, 64);
-  assert.equal(insert.params[1], keyId);
-  assert.equal(insert.params[5].includes("070707"), false);
-  assert.deepEqual(JSON.parse(insert.params[10]), quoteMetadata);
+  assert.equal(insert.params[7].length, 64);
+  assert.equal(insert.params[0], "merchant-client-001");
+  assert.equal(insert.params[2], keyId);
+  assert.equal(insert.params[6].includes("070707"), false);
+  assert.deepEqual(JSON.parse(insert.params[11]), quoteMetadata);
+});
+
+
+test("rejects an active terminal not authorized for the S2S key", async () => {
+  const pool = mockPool({ trusted: true, authorized: false });
+  const res = makeResponse();
+  const body = makeBody();
+
+  await createHandler({
+    poolProvider: () => pool,
+    env,
+    now: () => now
+  })({
+    method: "POST",
+    headers: signedHeaders(body),
+    body
+  }, res);
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(pool.state.inserted, false);
+  assert.ok(pool.state.queries.some(q =>
+    q.sql.includes("JOIN public.t2t_s2s_key_terminals auth")
+  ));
 });

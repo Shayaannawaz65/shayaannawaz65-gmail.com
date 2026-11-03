@@ -1,16 +1,5 @@
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import tronSyncHandler from './lib/routes/tron/sync.mjs';
-import heartbeatHandler from './lib/routes/console/heartbeat.mjs';
-import consoleStatusHandler from "./lib/routes/console/status.mjs";
-import transactionsHandler from './lib/routes/console/transactions.mjs';
-import paymentOrdersHandler from './lib/routes/console/payment-orders.mjs';
-import paymentQuoteHandler from './lib/routes/console/payment-quote-issuer.mjs';
-import paymentStatusHandler from './lib/routes/console/payment-status.mjs';
-import paymentOrderListHandler from './lib/routes/console/payment-order-list.mjs';
-import s2sTerminalAccessHandler from './lib/routes/console/s2s-terminal-access.mjs';
-import s2sTerminalAuditHandler from './lib/routes/console/s2s-terminal-audit.mjs';
-import s2sClientAdminHandler from './lib/routes/console/s2s-client-admin.mjs';
 import apiRouteHandler from './api/[...route].mjs';
 
 const app = express();
@@ -22,17 +11,7 @@ app.get('/', (_req, res) => {
 });
 app.use(express.static(publicDir));
 
-app.post('/api/tron/sync', tronSyncHandler);
-app.post('/api/console/heartbeat', heartbeatHandler);
-app.post('/api/console/payment-orders', paymentOrdersHandler);
-app.post('/api/console/payment-quote', paymentQuoteHandler);
-app.all('/api/console/payment-status', paymentStatusHandler);
-app.get('/api/console/status', consoleStatusHandler);
-app.get('/api/console/transactions', transactionsHandler);
-app.get('/api/console/payment-order-list', paymentOrderListHandler);
-app.all('/api/console/s2s-terminal-access', s2sTerminalAccessHandler);
-app.get('/api/console/s2s-terminal-audit', s2sTerminalAuditHandler);
-app.all('/api/console/s2s-client-admin', s2sClientAdminHandler);
+// One registry handles API dispatch in local Express and Vercel Functions.
 app.all('/api/*splat', apiRouteHandler);
 
 app.get('/health', (_req, res) => {
