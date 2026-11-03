@@ -171,6 +171,20 @@ nav a{color:#c6f36b;margin-right:16px}
 </section>
 
 <section class="panel">
+  <h2>Neon inbound payment receipt ledger</h2>
+  <p class="muted">Read-only records persisted in Neon. CM release, Loader receipt, blockchain verification and wallet settlement are shown separately; this view does not approve payments or move funds.</p>
+  <button id="refreshReceipts" type="button">Refresh receipt ledger</button>
+  <p id="receiptMessage" role="status" class="muted">Not loaded.</p>
+  <p id="receiptSummary" class="muted"></p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Created</th><th>CM receipt ref</th><th>Payment ref</th><th>Expected USD</th><th>CM reported USD</th><th>Loader</th><th>Blockchain</th><th>Exchange</th><th>Wallet settlement</th><th>Operations</th></tr></thead>
+      <tbody id="receipts"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
   <h2>Terminal authorization</h2>
   <p class="muted">Grant requires both the S2S key and terminal to be ACTIVE. Revoke remains available if either parent is inactive.</p>
   <label for="keyId">S2S key ID</label>
@@ -257,6 +271,9 @@ nav a{color:#c6f36b;margin-right:16px}
     $("terminalAdminPublicKey").value = "";
     $("ipEntries").replaceChildren();
     $("transactions").replaceChildren();
+    $("receipts").replaceChildren();
+    $("receiptSummary").textContent = "";
+    $("receiptMessage").textContent = "Not loaded.";
     $("feedToken").value = "";
     $("page").textContent = "";
     $("clientAuditPage").textContent = "";
@@ -398,6 +415,7 @@ nav a{color:#c6f36b;margin-right:16px}
       });
       message(`${data.action} completed for ${data.terminalId}.`);
       await loadTerminals();
+    await loadReceipts();
     } catch (error) {
       message(error.message || "Terminal administration failed.", true);
     }
@@ -458,6 +476,37 @@ nav a{color:#c6f36b;margin-right:16px}
       await loadIpAllowlist();
     } catch (error) {
       $("ipMessage").textContent = error.message || "Allowlist update failed.";
+    }
+  }
+
+  async function loadReceipts() {
+    if (!token) return;
+    $("receiptMessage").textContent = "Loading persisted Neon receipts…";
+    try {
+      const data = await request("/api/console/payment-receipts?limit=50&offset=0");
+      const body = $("receipts");
+      body.replaceChildren();
+      for (const item of data.records || []) {
+        const tr = document.createElement("tr");
+        addCell(tr, date(item.createdAt));
+        addCell(tr, item.sourceReceiptReference);
+        addCell(tr, item.paymentReference);
+        addCell(tr, item.expectedAmountUsd);
+        addCell(tr, item.cmReportedAmountUsd);
+        addCell(tr, item.loaderStatus);
+        addCell(tr, item.blockchainStatus);
+        addCell(tr, item.exchangeStatus);
+        addCell(tr, item.walletSettlementStatus);
+        addCell(tr, item.operationCount);
+        body.appendChild(tr);
+      }
+      const summary = data.summary || {};
+      $("receiptSummary").textContent =
+        `Total: ${summary.total ?? 0} · Awaiting Loader: ${summary.awaitingLoader ?? 0} · Loader received: ${summary.loaderReceived ?? 0} · Blockchain verified: ${summary.blockchainVerified ?? 0} · Wallet settled: ${summary.walletSettled ?? 0}`;
+      $("receiptMessage").textContent =
+        `Loaded ${data.records?.length || 0} of ${data.pagination?.total ?? 0} durable Neon receipt(s). Read-only; no approval or settlement run.`;
+    } catch (error) {
+      $("receiptMessage").textContent = error.message || "Neon receipt ledger unavailable.";
     }
   }
 
@@ -627,6 +676,7 @@ nav a{color:#c6f36b;margin-right:16px}
   $("refreshIp").addEventListener("click", loadIpAllowlist);
   $("addIp").addEventListener("click", () => changeIpAllowlist("allow"));
   $("refreshTransactions").addEventListener("click", loadTransactions);
+  $("refreshReceipts").addEventListener("click", loadReceipts);
 })();
 </script>
 </body>
