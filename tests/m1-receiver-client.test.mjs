@@ -75,6 +75,30 @@ test("adds optional HMAC-SHA256 signature over exact serialized request body", a
   assert.equal(captured.headers["X-Request-Signature"], expected);
 });
 
+test("adds optional HMAC-SHA256 signature over the exact serialized request body", async () => {
+  let captured;
+  const secret = "unit-test-hmac-secret-with-32-bytes-min";
+  const client = createM1ReceiverClient({
+    ...config,
+    requestSignatureSecret: secret,
+    transport: async request => {
+      captured = request;
+      return { statusCode: 202, body: "{}" };
+    }
+  });
+  await client.submitSettlement({ instruction, idempotencyKey: "test-hmac-key-0001" });
+  const { createHmac } = await import("node:crypto");
+  const expected = createHmac("sha256", secret).update(captured.body).digest("base64url");
+  assert.equal(captured.headers["X-Request-Signature"], expected);
+});
+
+test("rejects an Ethereum wallet address for TRC20 settlement", () => {
+  assert.throws(() => createM1ReceiverClient({
+    ...config,
+    treasuryWallet: "0x3ffC0C113912c17C41086c9ceB74420F2E4e7690"
+  }), /TRON network, or treasury wallet/);
+});
+
 test("rejects a missing idempotency key before transport", async () => {
   let called = false;
   const client = createM1ReceiverClient({
