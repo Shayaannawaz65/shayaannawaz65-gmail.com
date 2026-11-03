@@ -37,6 +37,19 @@ Ethereum ERC-20 wallet addresses and network identifiers are rejected. The
 TRON destination wallet is supplied through `M1_TREASURY_WALLET`; no
 production wallet address is hard-coded or guessed.
 
+## Current Vercel preview provisioning
+
+For the `s2s-local-work` Preview environment, the sender-authorized
+`M1_API_TOKEN` and pinned public receiver certificate
+`M1_TLS_CA_CERT_PEM` have been stored as encrypted/sensitive server-side
+variables. They are not present in source control. A fresh Preview deployment
+is required for Vercel Functions to load newly-added environment variables.
+
+The Bearer JWT, TRON treasury wallet, and callback URL are separate settings;
+the dispatch route fails closed if they are not configured. Do not substitute
+the T2T customer deposit address for the receiver's treasury wallet unless
+the receiver explicitly confirms that mapping.
+
 ## Database
 
 Apply `migrations/023_m1_settlement_outbox.sql` only after the existing payment
