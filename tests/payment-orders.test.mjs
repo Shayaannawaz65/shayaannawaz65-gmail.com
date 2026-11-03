@@ -64,7 +64,6 @@ function makeBody(overrides = {}) {
     timestamp: now,
     nonce,
     invoiceReference: "INV-TEST-001",
-    customerWhatsappNumber: "+15551234567",
     amountUsdCents: 1250,
     amountUsdtRaw: calculateUsdtRaw(
       1250, quoteRateNumerator, quoteRateDenominator
@@ -177,7 +176,7 @@ const env = {
 function signedHeaders(body, signatureOverride) {
   const q = body.quote;
   const metadataHash = crypto.createHash("sha256").update(JSON.stringify(q?.rateMetadata ?? null)).digest("hex");
-  const canonical = ["T2T_S2S_PAYMENT_ORDER_V2", keyId, "merchant-client-001", body.terminalId || "", body.timestamp, body.nonce, body.invoiceReference, body.customerWhatsappNumber, String(body.amountUsdCents), body.amountUsdtRaw, body.expiresInSeconds, String(q?.quoteId || ""), String(q?.rateNumerator || ""), String(q?.rateDenominator || ""), String(q?.expiresAt || ""), String(q?.signature || ""), metadataHash].join("\n");
+  const canonical = ["T2T_S2S_PAYMENT_ORDER_V2", keyId, "merchant-client-001", body.terminalId || "", body.timestamp, body.nonce, body.invoiceReference, String(body.amountUsdCents), body.amountUsdtRaw, body.expiresInSeconds, String(q?.quoteId || ""), String(q?.rateNumerator || ""), String(q?.rateDenominator || ""), String(q?.expiresAt || ""), String(q?.signature || ""), metadataHash].join("\n");
   return {"x-t2t-key-id":keyId,"x-t2t-signature":signatureOverride || crypto.sign("sha256",Buffer.from(canonical),privateKey).toString("base64")};
 }
 

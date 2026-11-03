@@ -24,6 +24,7 @@ VALUES ('merchant-prod-key-2026-01', '<BASE64_DER_SPKI_PUBLIC_KEY>');
 
 JSON body fields:
 - `terminalId`: required only for POS clients; omitted for merchant clients
+- `customerWhatsappNumber`: required E.164 number, including `+` and country code (for Qatar, e.g. `+974XXXXXXXX`)
 - `timestamp`: Unix milliseconds
 - `nonce`: unique 32-64 character hex string
 - `invoiceReference`: merchant invoice reference
@@ -42,6 +43,7 @@ The merchant signature is over the UTF-8 canonical string below, joined with a s
 T2T_S2S_PAYMENT_ORDER_V1
 {keyId}
 {terminalId}
+{customerWhatsappNumber}
 {timestamp}
 {nonce}
 {invoiceReference}
@@ -56,7 +58,7 @@ T2T_S2S_PAYMENT_ORDER_V1
 {sha256(JSON.stringify(quote.rateMetadata ?? null))}
 ```
 
-The quote itself must also pass T2T's independent signature, freshness and amount validation. A successful response contains the payment URL and exact receiver/amount. Treat `PENDING` as unpaid.
+The quote itself must also pass T2T's independent signature, freshness and amount validation. A successful response contains the payment URL, exact receiver/amount, and `whatsappShareUrl`. The POS should open `whatsappShareUrl` after order creation; WhatsApp opens a pre-filled message to the supplied customer number and the merchant/operator must press Send. This is user-confirmed sharing, not automated WhatsApp delivery. T2T does not persist the customer's phone number. Treat `PENDING` as unpaid.
 
 ## Payment status
 

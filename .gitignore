@@ -20,3 +20,6 @@ backups/
 .local-keys/
 .env.cm.local
 .env.m1.local
+
+__pycache__/
+*.py[cod]
