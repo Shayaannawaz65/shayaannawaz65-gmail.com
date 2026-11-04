@@ -95,7 +95,6 @@ test("adds optional HMAC-SHA256 signature over exact serialized request body", a
   await client.submitSettlement({ instruction, idempotencyKey: "test-hmac-key-0001" });
   const { createHmac } = await import("node:crypto");
   const captured = mock.getSettlementRequest();
-  const captured = mock.getSettlementRequest();
   const expected = createHmac("sha256", secret).update(captured.body).digest("base64url");
   assert.equal(captured.headers["X-Request-Signature"], expected);
 });
@@ -110,6 +109,7 @@ test("adds optional HMAC-SHA256 signature over the exact serialized request body
   });
   await client.submitSettlement({ instruction, idempotencyKey: "test-hmac-key-0001" });
   const { createHmac } = await import("node:crypto");
+  const captured = mock.getSettlementRequest();
   const expected = createHmac("sha256", secret).update(captured.body).digest("base64url");
   assert.equal(captured.headers["X-Request-Signature"], expected);
 });
