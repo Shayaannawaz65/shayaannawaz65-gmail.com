@@ -88,6 +88,16 @@ test("prepares M1 payload from locked quote and verified Barclays beneficiary wi
     M1_DEBTOR_NAME: "Verified Sender Limited",
     M1_DEBTOR_ACCOUNT: "12345678",
     M1_DEBTOR_VERIFICATION_REF: "bank-record-verification-001",
+    M1_BARCLAYS_ACCOUNT_NAME: "SK Information Technologies Limited",
+    M1_BARCLAYS_ACCOUNT_NUMBER: "87654321",
+    M1_BARCLAYS_SORT_CODE: "11-22-33",
+    M1_BARCLAYS_BANK_ADDRESS: "1 Test Street, London",
+    M1_BARCLAYS_LEI: "549300TESTLEI00000000",
+    M1_BARCLAYS_ACCOUNT_NAME: "SK Information Technologies Limited",
+    M1_BARCLAYS_ACCOUNT_NUMBER: "87654321",
+    M1_BARCLAYS_SORT_CODE: "11-22-33",
+    M1_BARCLAYS_BANK_ADDRESS: "1 Test Street, London",
+    M1_BARCLAYS_LEI: "549300TESTLEI00000000",
     M1_EXCHANGE_RATE_DIRECTION: "USD_PER_USDT",
     M1_EXCHANGE_RATE_DECIMALS: "4",
     M1_CALLBACK_URL: "https://sender.example/api/m1/skit-callback",
@@ -117,10 +127,11 @@ test("prepares M1 payload from locked quote and verified Barclays beneficiary wi
   assert.equal(payload.debtor_name, "Verified Sender Limited");
   assert.equal(payload.debtor_account, "12345678");
   assert.equal(payload.creditor_name, "SK Information Technologies Limited");
-  assert.equal(payload.creditor_account, "15909338");
+  assert.equal(payload.creditor_account, "87654321");
   assert.equal(payload.creditor_bank_name, "Barclays");
-  assert.equal(payload.creditor_sort_code, "23-14-86");
-  assert.equal(payload.creditor_lei, "636700DYHM5WFT8YJM7");
+  assert.equal(payload.creditor_bank_address, "1 Test Street, London");
+  assert.equal(payload.creditor_sort_code, "11-22-33");
+  assert.equal(payload.creditor_lei, "549300TESTLEI00000000");
   assert.deepEqual(insert.params[15], []);
 });
 
