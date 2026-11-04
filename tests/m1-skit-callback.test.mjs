@@ -61,13 +61,14 @@ async function invoke({ status = "ACCEPTED", duplicate = false, eventId = "event
   };
   const res = responseRecorder();
   const pool = fakePool({ duplicate });
-  await createSkitCallbackHandler({ env, poolProvider: () => pool })(req, res);
-  return { res, pool };
+  let error = null;
+  await createSkitCallbackHandler({ env, poolProvider: () => pool, onError: value => { error = value?.message || String(value); } })(req, res);
+  return { res, pool, error };
 }
 
 test("verifies raw-body HMAC and processes callback under a row lock", async () => {
-  const { res, pool } = await invoke({ status: "FINAL_SETTLED" });
-  assert.equal(res.statusCode, 200);
+  const { res, pool, error } = await invoke({ status: "FINAL_SETTLED" });
+  assert.equal(res.statusCode, 200, error || "callback failed");
   assert.equal(res.body.settlement_status, "SETTLED");
   assert.ok(pool.calls.some(call => call.sql.includes("FOR UPDATE")));
   assert.ok(pool.calls.some(call => call.sql.includes("INSERT INTO public.t2t_m1_settlement_callback_events")));
@@ -75,8 +76,8 @@ test("verifies raw-body HMAC and processes callback under a row lock", async () 
 });
 
 test("returns idempotent success for an already recorded event", async () => {
-  const { res, pool } = await invoke({ duplicate: true });
-  assert.equal(res.statusCode, 200);
+  const { res, pool, error } = await invoke({ duplicate: true });
+  assert.equal(res.statusCode, 200, error || "callback failed");
   assert.equal(res.body.duplicate, true);
   assert.ok(pool.calls.some(call => call.sql === "ROLLBACK"));
 });
