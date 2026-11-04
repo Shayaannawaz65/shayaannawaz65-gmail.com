@@ -14,13 +14,13 @@ build variables or commit their values.
 | Variable | Purpose |
 | --- | --- |
 | `M1_API_TOKEN` | Rotated M1 X-API-TOKEN credential. |
-| `M1_JWT_TOKEN` | Current M1 receiver JWT. It is checked for a valid JWT `exp` claim before dispatch. |
+| `M1_CLIENT_ID` | CM-issued client ID sent as `sub` to the receiver-token endpoint. |
 | `M1_SERVER_ID` | Must be `M1-RECV-LIVE-05A308CC`. |
 | `M1_ENDPOINT` | Must be the approved HTTPS settlement receiver URL. |
 | `M1_AUTH_ENDPOINT` | Approved receiver-token URL. |
 | `M1_TOKEN_NETWORK` | Must be `TRON Mainnet TRC20`; Ethereum ERC-20 is rejected. |
 | `M1_TREASURY_WALLET` | Approved TRON Base58Check wallet address, server-side only. |
-| `M1_REQUEST_SIGNATURE_SECRET` | Optional HMAC-SHA256 secret if the receiver requires `X-Request-Signature`. |
+| `M1_ID_DERIVATION_SECRET` | At least 32 random bytes; HMAC-SHA256 derives stable opaque transaction and idempotency IDs. |\n| `M1_REQUEST_SIGNATURE_SECRET` | Separate secret of at least 32 random bytes; HMAC-SHA256 signs every exact settlement request body. |
 | `M1_TLS_CA_CERT_PEM` | Server-side PEM trust certificate used with normal TLS verification and the pinned SHA-256 fingerprint. |
 | `M1_CALLBACK_URL` | Stable HTTPS callback URL. Callback authentication must be approved before callbacks can update status. |
 | `T2T_DATABASE_URL` or existing `DATABASE_URL_UNPOOLED` | Existing PostgreSQL connection. Use server-side Vercel configuration only. |
