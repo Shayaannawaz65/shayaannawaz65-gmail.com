@@ -5,6 +5,7 @@ import { createHandler } from "../lib/routes/console/m1-settlement-admin.mjs";
 const adminToken = "m1-admin-token-for-integration-tests-at-least-32";
 const secret = "m1-test-secret-for-hmac-derived-identifiers-at-least-32";
 const txHash = "a".repeat(64);
+const treasuryWallet = `T${"1".repeat(33)}`;
 const order = {
   order_id: "00000000-0000-4000-8000-000000000011",
   invoice_reference: "INV-M1-001",
@@ -95,7 +96,7 @@ test("prepares M1 payload from locked quote and verified Barclays beneficiary wi
     M1_CALLBACK_EVENT_ID_HEADER: "x-skit-event-id",
     M1_CALLBACK_SIGNATURE_ENCODING: "hex",
     M1_CALLBACK_STATUS_MAP: JSON.stringify({ ACCEPTED: "ACCEPTED", FINAL_SETTLED: "SETTLED" }),
-    M1_TREASURY_WALLET: "T123456789ABCDEFGHJKLMNPQRSTUVWXYZab"
+    M1_TREASURY_WALLET: treasuryWallet
   };
   const handler = createHandler({ env, poolProvider: () => pool });
   const res = responseRecorder();
@@ -137,7 +138,7 @@ test("keeps M1 instruction blocked when verified debtor bank source is absent", 
     M1_CALLBACK_EVENT_ID_HEADER: "x-skit-event-id",
     M1_CALLBACK_SIGNATURE_ENCODING: "hex",
     M1_CALLBACK_STATUS_MAP: JSON.stringify({ ACCEPTED: "ACCEPTED" }),
-    M1_TREASURY_WALLET: "T123456789ABCDEFGHJKLMNPQRSTUVWXYZab"
+    M1_TREASURY_WALLET: treasuryWallet
   };
   const handler = createHandler({ env, poolProvider: () => pool });
   const res = responseRecorder();
