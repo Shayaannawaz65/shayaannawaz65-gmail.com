@@ -20,7 +20,8 @@ build variables or commit their values.
 | `M1_AUTH_ENDPOINT` | Approved receiver-token URL. |
 | `M1_TOKEN_NETWORK` | Must be `TRON Mainnet TRC20`; Ethereum ERC-20 is rejected. |
 | `M1_TREASURY_WALLET` | Approved TRON Base58Check wallet address, server-side only. |
-| `M1_ID_DERIVATION_SECRET` | At least 32 random bytes; HMAC-SHA256 derives stable opaque transaction and idempotency IDs. |\n| `M1_REQUEST_SIGNATURE_SECRET` | Separate secret of at least 32 random bytes; HMAC-SHA256 signs every exact settlement request body. |
+| `M1_ID_DERIVATION_SECRET` | At least 32 random bytes; HMAC-SHA256 derives stable opaque transaction and idempotency IDs. |
+| `M1_REQUEST_SIGNATURE_SECRET` | Separate secret of at least 32 random bytes; HMAC-SHA256 signs every exact settlement request body. |
 | `M1_TLS_CA_CERT_PEM` | Server-side PEM trust certificate used with normal TLS verification and the pinned SHA-256 fingerprint. |
 | `M1_CALLBACK_URL` | Stable HTTPS callback URL. Callback authentication must be approved before callbacks can update status. |
 | `T2T_DATABASE_URL` or existing `DATABASE_URL_UNPOOLED` | Existing PostgreSQL connection. Use server-side Vercel configuration only. |
