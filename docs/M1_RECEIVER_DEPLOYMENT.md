@@ -99,7 +99,10 @@ map explicitly says that the provider status means final settlement.
 
 The prepare path reuses the payment order's locked Kraken/CoinGecko quote and
 BigInt-derived USDT raw amount. It formats USD to two decimals and TRC20 USDT
-to six decimals without floating-point conversion. It remains blocked until
+to six decimals without floating-point conversion. It also verifies that the
+configured, precision-rounded USD-per-USDT rate reproduces the exact locked
+USDT amount; if rounding changes that amount, the instruction stays blocked.
+It remains blocked until
 the exchange-rate direction/precision, sender bank details and their
 verification reference, callback contract, callback URL, and approved TRON
 treasury wallet are configured.
