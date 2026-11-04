@@ -97,7 +97,7 @@ test("signs the exact serialized settlement body with mandatory HMAC-SHA256", as
   let captured;
   const client = createM1ReceiverClient({
     ...config,
-    transport: transportFor({ statusCode: 202, body: "{}" }, request => { captured = request; })
+    transport: transportFor({ statusCode: 202, body: '{"status":"ACCEPTED"}' }, request => { captured = request; })
   });
   await client.submitSettlement({ instruction, idempotencyKey: "test-hmac-key-0001" });
   const expected = createHmac("sha256", config.requestSignatureSecret)
@@ -175,7 +175,7 @@ test("does not treat non-202 responses as accepted", async () => {
   });
   await assert.rejects(
     client.submitSettlement({ instruction, idempotencyKey: "test-idempotency-0003" }),
-    error => error.code === "M1_UNEXPECTED_STATUS"
+    error => error.code === "M1_REJECTED"
   );
 });
 
@@ -185,7 +185,7 @@ test("does not send optional HMAC header when SKIT signing secret is not configu
   const client = createM1ReceiverClient({
     ...config,
     requestSignatureSecret: "",
-    transport: transportFor({ statusCode: 202, body: "{}" }, request => { captured = request; })
+    transport: transportFor({ statusCode: 202, body: '{"status":"ACCEPTED"}' }, request => { captured = request; })
   });
   const result = await client.submitSettlement({
     instruction, idempotencyKey: "test-optional-signature-0001"
