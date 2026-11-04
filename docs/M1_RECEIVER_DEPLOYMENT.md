@@ -37,18 +37,14 @@ Ethereum ERC-20 wallet addresses and network identifiers are rejected. The
 TRON destination wallet is supplied through `M1_TREASURY_WALLET`; no
 production wallet address is hard-coded or guessed.
 
-## Current Vercel preview provisioning
+## Current deployment status
 
-For the `s2s-local-work` Preview environment, the sender-authorized
-`M1_API_TOKEN` and pinned public receiver certificate
-`M1_TLS_CA_CERT_PEM` have been stored as encrypted/sensitive server-side
-variables. They are not present in source control. A fresh Preview deployment
-is required for Vercel Functions to load newly-added environment variables.
-
-The Bearer JWT, TRON treasury wallet, and callback URL are separate settings;
-the dispatch route fails closed if they are not configured. Do not substitute
-the T2T customer deposit address for the receiver's treasury wallet unless
-the receiver explicitly confirms that mapping.
+No production deployment is confirmed by this document. Do not assume that
+credentials, a live JWT, treasury wallet, callback URL, or required bank
+mapping are provisioned in Vercel merely because variable names are listed
+here. Verify each production environment variable in the actual target Vercel
+project before enabling dispatch. The previously inspected project was a
+legacy T2T deployment and is not confirmed as the correct CM Sender project.
 
 ## Database
 
