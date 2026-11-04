@@ -4,7 +4,7 @@ import apiRouteHandler from './api/[...route].mjs';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '16kb', strict: true }));
+app.use(express.json({ limit: '64kb', strict: true, verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
 const publicDir = fileURLToPath(new URL('./public/', import.meta.url));
 app.get('/', (_req, res) => {
   res.sendFile(fileURLToPath(new URL('./public/index.html', import.meta.url)));
