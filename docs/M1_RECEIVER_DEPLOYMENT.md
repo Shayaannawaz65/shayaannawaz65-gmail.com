@@ -23,7 +23,17 @@ build variables or commit their values.
 | `M1_ID_DERIVATION_SECRET` | At least 32 random bytes; HMAC-SHA256 derives stable opaque transaction and idempotency IDs. |
 | `M1_REQUEST_SIGNATURE_SECRET` | Optional separate secret; if configured, use at least 32 random bytes and HMAC-SHA256 signs the exact settlement request body. SKIT confirms `X-Request-Signature` is optional. |
 | `M1_TLS_CA_CERT_PEM` | Server-side PEM trust certificate used with normal TLS verification and the pinned SHA-256 fingerprint. |
-| `M1_CALLBACK_URL` | Stable HTTPS callback URL. Callback authentication must be approved before callbacks can update status. |
+| `M1_CALLBACK_URL` | Stable HTTPS callback URL; use `https://<production-host>/api/m1/skit-callback`. |
+| `M1_DEBTOR_NAME` | Legal account-holder name of the actual sending bank account; never populate from a TRON wallet or beneficiary record. |
+| `M1_DEBTOR_ACCOUNT` | Actual sending bank account identifier, server-side only. |
+| `M1_DEBTOR_VERIFICATION_REF` | Internal reference to the verified sender bank record / mandate supporting the debtor fields. |
+| `M1_EXCHANGE_RATE_DIRECTION` | Must be explicitly confirmed as `USD_PER_USDT` before dispatch. |
+| `M1_EXCHANGE_RATE_DECIMALS` | SKIT-confirmed rate precision, integer 0–12. |
+| `M1_CALLBACK_HMAC_SECRET` | Separate callback HMAC-SHA256 secret, at least 32 bytes; provision only after SKIT confirms the callback signing contract. |
+| `M1_CALLBACK_SIGNATURE_HEADER` | Exact SKIT callback signature header name, e.g. only if confirmed by SKIT. |
+| `M1_CALLBACK_EVENT_ID_HEADER` | Exact unique callback event-ID header name, confirmed by SKIT. |
+| `M1_CALLBACK_SIGNATURE_ENCODING` | SKIT-confirmed signature encoding: `hex` or `base64url`. |
+| `M1_CALLBACK_STATUS_MAP` | JSON object mapping exact SKIT statuses to `ACCEPTED`, `PROCESSING`, `SETTLED`, `REJECTED`, or `UNKNOWN`; only map a final status after SKIT confirms its meaning. |
 | `T2T_DATABASE_URL` or existing `DATABASE_URL_UNPOOLED` | Existing PostgreSQL connection. Use server-side Vercel configuration only. |
 | `T2T_S2S_AUTHORIZATION_ADMIN_TOKEN` | Existing admin bearer credential protecting outbox read/prepare/dispatch operations. |
 | `T2T_S2S_AUTHORIZATION_ADMIN_ID` | Existing audit actor ID for the authorized operator. |
@@ -64,8 +74,24 @@ account, narrative, and callback URL. The supplied TRON sender address is not
 a bank account-holder identity. No request is submitted while required fields
 are missing.
 
-The receiver JWT is supplied through protected `M1_JWT_TOKEN` and checked for
-expiry before dispatch. The optional HMAC header is generated only when its
-separate server-side secret is configured. Callback authentication remains a
-separate requirement; no callback is marked complete without its authenticated
-contract.
+The receiver JWT is fetched from SKIT's token endpoint using the configured
+client ID, cached only until its JWT `exp` with a safety margin, and checked
+for the expected subject, receiver server ID, and token purpose. The optional
+outbound `X-Request-Signature` uses the separate `M1_REQUEST_SIGNATURE_SECRET`.
+
+The callback handler is `POST /api/m1/skit-callback`. It verifies the HMAC
+against the original raw request bytes, requires a unique provider event ID,
+and uses a PostgreSQL row lock on the matching outbox instruction. Callback
+headers, signature encoding, and status mappings are deliberately not assumed:
+the handler stays disabled (503) until the exact SKIT callback contract is
+configured. It records callback events under unique event-ID and payload-hash
+constraints and keeps the submission status separate from the settlement
+status. A callback can map to `SETTLED` only when the configured SKIT status
+map explicitly says that the provider status means final settlement.
+
+The prepare path reuses the payment order's locked Kraken/CoinGecko quote and
+BigInt-derived USDT raw amount. It formats USD to two decimals and TRC20 USDT
+to six decimals without floating-point conversion. It remains blocked until
+the exchange-rate direction/precision, sender bank details and their
+verification reference, callback contract, callback URL, and approved TRON
+treasury wallet are configured.
