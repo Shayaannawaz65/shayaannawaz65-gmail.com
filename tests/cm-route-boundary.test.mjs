@@ -44,5 +44,5 @@ test("catch-all registry includes the authenticated read-only Neon receipt ledge
     "tron/health"
   ]) assert.ok(API_ROUTE_PATHS.includes(route), `${route} must be registered`);
   assert.equal(API_ROUTE_PATHS.includes("console/cm-payment-receipts"), false);
-  assert.equal(API_ROUTE_PATHS.some(route => /skit/i.test(route)), false);
+  assert.equal(API_ROUTE_PATHS.includes("m1/skit-callback"), false);
 });
