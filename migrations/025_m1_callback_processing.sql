@@ -1,6 +1,7 @@
 BEGIN;
 
 ALTER TABLE public.t2t_m1_settlement_outbox
+  ADD COLUMN IF NOT EXISTS debtor_verification_ref TEXT,
   ADD COLUMN IF NOT EXISTS settlement_status TEXT NOT NULL DEFAULT 'NOT_REPORTED',
   ADD COLUMN IF NOT EXISTS settlement_status_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS external_settlement_reference TEXT;
