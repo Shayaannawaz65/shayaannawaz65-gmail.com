@@ -200,10 +200,10 @@ test("blocks a rounded M1 rate that would change the locked USDT amount", async 
 });
 
 
-test("hard-blocks every production M1 outbound submission before database or network access", async () => {
+test("hard-blocks M1 outbound submission before database or network access", async () => {
   const handler = createHandler({
     env: {
-      NODE_ENV: "production",
+      NODE_ENV: "test",
       T2T_S2S_AUTHORIZATION_ADMIN_TOKEN: adminToken,
       T2T_S2S_AUTHORIZATION_ADMIN_ID: "test-operator"
     },
@@ -218,5 +218,5 @@ test("hard-blocks every production M1 outbound submission before database or net
     body: { action: "dispatch", instructionId: "00000000-0000-4000-8000-000000000022" }
   }, res);
   assert.equal(res.statusCode, 403);
-  assert.match(res.body.error, /production instruction submission is disabled/);
+  assert.match(res.body.error, /M1 outbound submission is disabled/);
 });
