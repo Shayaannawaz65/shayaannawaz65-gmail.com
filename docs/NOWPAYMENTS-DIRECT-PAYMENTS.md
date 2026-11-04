@@ -24,9 +24,10 @@ protection, merchant IP allowlist, rate limit and t2t_payment_orders ledger.
 ## Boundaries
 
 - This does not create or forward an M1 settlement instruction.
-- The existing M1 receiver administration and legacy TRON scanner are
-  unchanged. Direct-provider orders have no scanner-confirmed TRON evidence
-  and cannot enter the legacy scanner-driven M1 dispatch path.
+- The existing M1 receiver workflow and receiver contract are retained. The
+  legacy TRON scanner and M1 verified-order lookup now explicitly exclude
+  NOWPayments-owned orders, so provider IPNs are the only confirmation source
+  for this payment path.
 - Hosted-invoice fields and migration 024 remain for historical compatibility.
 - Migration 025 is additive and must be applied to a non-production Neon branch
   for validation before any production rollout.
