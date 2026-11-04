@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
-import { createM1ReceiverClient } from "../lib/cm/m1-receiver-client.mjs";
+import { createM1ReceiverClient, classifyM1SubmissionError } from "../lib/cm/m1-receiver-client.mjs";
 
 const certificatePem = readFileSync("config/certs/m1-receiver.pem", "utf8");
 const tronWallet = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb";
@@ -72,7 +72,7 @@ test("sends TRC20 settlement with token fetched using client ID and treats 202 a
   const client = createM1ReceiverClient({
     ...config,
     transport: transportFor(
-      { statusCode: 202, body: '{"status":"accepted"}' },
+      { statusCode: 202, body: '{"status":"ACCEPTED"}' },
       request => { captured = request; }
     )
   });
@@ -193,4 +193,80 @@ test("does not send optional HMAC header when SKIT signing secret is not configu
   assert.equal(captured.headers["X-Request-Signature"], undefined);
   assert.equal(result.status, "ACCEPTED");
   assert.equal(result.settled, false);
+});
+
+
+test("classifies ambiguous transport timeouts as UNKNOWN without retrying", async () => {
+  for (const code of ["ECONNABORTED", "ETIMEDOUT", "ECONNRESET"]) {
+    let settlementCalls = 0;
+    const client = createM1ReceiverClient({
+      ...config,
+      transport: async request => {
+        if (request.url === config.authEndpoint) {
+          return {
+            statusCode: 200,
+            body: JSON.stringify({
+              access_token: makeJwt(),
+              server_id: config.serverId,
+              endpoint: config.endpoint
+            })
+          };
+        }
+        settlementCalls += 1;
+        const error = new Error("socket timeout");
+        error.code = code;
+        throw error;
+      }
+    });
+    await assert.rejects(
+      client.submitSettlement({ instruction, idempotencyKey: "test-unknown-timeout-0001" }),
+      error => error.code === "M1_UNKNOWN" &&
+        error.transportCode === code &&
+        classifyM1SubmissionError(error) === "UNKNOWN"
+    );
+    assert.equal(settlementCalls, 1, "ambiguous submission must not be retried automatically");
+  }
+});
+
+test("classifies HTTP 409 as CONFLICT and never as ACCEPTED", async () => {
+  const client = createM1ReceiverClient({
+    ...config,
+    transport: transportFor({ statusCode: 409, body: '{"error":"conflict"}' })
+  });
+  await assert.rejects(
+    client.submitSettlement({ instruction, idempotencyKey: "test-conflict-map-0001" }),
+    error => error.code === "M1_CONFLICT" &&
+      classifyM1SubmissionError(error) === "CONFLICT"
+  );
+});
+
+test("classifies 5xx and malformed 202 acknowledgements as UNKNOWN", async () => {
+  for (const response of [
+    { statusCode: 503, body: '{"error":"unavailable"}' },
+    { statusCode: 202, body: '{"status":"PENDING"}' },
+    { statusCode: 202, body: '{"status":"accepted"}' },
+    { statusCode: 202, body: "not-json" }
+  ]) {
+    const client = createM1ReceiverClient({
+      ...config,
+      transport: transportFor(response)
+    });
+    await assert.rejects(
+      client.submitSettlement({ instruction, idempotencyKey: "test-unknown-ack-0001" }),
+      error => error.code === "M1_UNKNOWN" &&
+        classifyM1SubmissionError(error) === "UNKNOWN"
+    );
+  }
+});
+
+test("maps definitive 4xx rejection to REJECTED using the existing outbox enum", async () => {
+  const client = createM1ReceiverClient({
+    ...config,
+    transport: transportFor({ statusCode: 400, body: '{"error":"invalid"}' })
+  });
+  await assert.rejects(
+    client.submitSettlement({ instruction, idempotencyKey: "test-rejected-map-0001" }),
+    error => error.code === "M1_REJECTED" &&
+      classifyM1SubmissionError(error) === "REJECTED"
+  );
 });
