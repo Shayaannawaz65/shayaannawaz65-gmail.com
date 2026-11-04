@@ -87,7 +87,7 @@ client ID, cached only until its JWT `exp` with a safety margin, and checked
 for the expected subject, receiver server ID, and token purpose. The optional
 outbound `X-Request-Signature` uses the separate `M1_REQUEST_SIGNATURE_SECRET`.
 
-The callback handler is `POST /api/m1/skit-callback`. It verifies the HMAC
+The callback handler is `POST /api/m1/skit-callback`. On Vercel it is served by a dedicated function with JSON body parsing disabled so the original request stream remains available; local Express captures `req.rawBody` before parsing. It verifies the HMAC
 against the original raw request bytes, requires a unique provider event ID,
 and uses a PostgreSQL row lock on the matching outbox instruction. Callback
 headers, signature encoding, and status mappings are deliberately not assumed:
