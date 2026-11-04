@@ -23,9 +23,10 @@ function makeResponse() {
 function makePayload(overrides = {}) {
   return {
     payment_id: "np-payment-001",
-    invoice_id: "np-invoice-001",
     payment_status: "finished",
     price_amount: 12.5,
+    pay_amount: 12.50125,
+    pay_address: "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8",
     price_currency: "usd",
     pay_currency: "usdttrc20",
     order_id: ORDER_ID,
@@ -59,8 +60,10 @@ function mockPool({
     order_id: ORDER_ID,
     amount_usd_cents: "1250",
     provider_name: "NOWPAYMENTS",
-    provider_invoice_id: "np-invoice-001",
-    provider_payment_id: null,
+    provider_payment_id: "np-payment-001",
+    provider_payment_address: "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8",
+    provider_pay_amount: "12.501250",
+    provider_pay_currency: "usdttrc20",
     status: "PENDING",
     ...order
   };
@@ -164,10 +167,9 @@ test("verified finished USDT TRC20 IPN confirms the matching USD invoice", async
   );
   assert.ok(update);
   assert.equal(update.params[0], ORDER_ID);
-  assert.equal(update.params[1], "np-invoice-001");
-  assert.equal(update.params[2], "np-payment-001");
-  assert.equal(update.params[3], "finished");
-  assert.equal(update.params[5], "CONFIRMED");
+  assert.equal(update.params[1], "np-payment-001");
+  assert.equal(update.params[2], "finished");
+  assert.equal(update.params[4], "CONFIRMED");
 });
 
 test("rejects an IPN for a different payment currency", async () => {
@@ -194,10 +196,22 @@ test("rejects USD amount mismatch and rolls back", async () => {
   assert.equal(pool.state.updateCount, 0);
 });
 
-test("rejects an invoice ID that does not belong to the order", async () => {
+test("rejects a payment ID that does not belong to the order", async () => {
   const pool = mockPool();
   const { res } = await invoke({
-    payload: makePayload({ invoice_id: "another-invoice" }),
+    payload: makePayload({ payment_id: "another-payment" }),
+    pool
+  });
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(pool.state.rolledBack, 1);
+  assert.equal(pool.state.updateCount, 0);
+});
+
+test("rejects a direct payment amount mismatch in raw USDT units", async () => {
+  const pool = mockPool();
+  const { res } = await invoke({
+    payload: makePayload({ pay_amount: 12.501251 }),
     pool
   });
 
