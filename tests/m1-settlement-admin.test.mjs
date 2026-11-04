@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHandler } from "../lib/routes/console/m1-settlement-admin.mjs";
+import { calculateUsdtRaw } from "../lib/payment-quote.mjs";
 
 const adminToken = "m1-admin-token-for-integration-tests-at-least-32";
 const secret = "m1-test-secret-for-hmac-derived-identifiers-at-least-32";
@@ -41,13 +42,13 @@ function responseRecorder() {
   };
 }
 
-function fakePool() {
+function fakePool(orderValue = order) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
       calls.push({ sql: String(sql), params });
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
-      if (String(sql).includes("FROM public.t2t_payment_orders o")) return { rowCount: 1, rows: [order] };
+      if (String(sql).includes("FROM public.t2t_payment_orders o")) return { rowCount: 1, rows: [orderValue] };
       if (String(sql).includes("INSERT INTO public.t2t_m1_settlement_outbox")) {
         return {
           rowCount: 1,
@@ -163,4 +164,55 @@ test("keeps M1 instruction blocked when verified debtor bank source is absent", 
   assert.equal(res.body.instruction.submissionStatus, "BLOCKED_MISSING_REQUIRED_FIELDS");
   assert.ok(res.body.instruction.missingRequiredFields.includes("debtor_name_from_verified_sender_bank_record"));
   assert.ok(res.body.instruction.missingRequiredFields.includes("debtor_account_from_verified_sender_bank_record"));
+});
+
+test("blocks a rounded M1 rate that would change the locked USDT amount", async () => {
+  const rateNumerator = "2000000000000";
+  const rateDenominator = "2000098000000";
+  const mismatchedOrder = {
+    ...order,
+    exchange_rate_numerator: rateNumerator,
+    exchange_rate_denominator: rateDenominator,
+    amount_usdt_raw: calculateUsdtRaw("100", rateNumerator, rateDenominator),
+    exchange_rate_metadata: {
+      ...order.exchange_rate_metadata,
+      referencePriceUsdPerUsdt: "1.000049000000"
+    }
+  };
+  const pool = fakePool(mismatchedOrder);
+  const env = {
+    T2T_S2S_AUTHORIZATION_ADMIN_TOKEN: adminToken,
+    T2T_S2S_AUTHORIZATION_ADMIN_ID: "test-operator",
+    M1_ID_DERIVATION_SECRET: secret,
+    M1_DEBTOR_NAME: "Verified Sender Limited",
+    M1_DEBTOR_ACCOUNT: "12345678",
+    M1_DEBTOR_VERIFICATION_REF: "bank-record-verification-001",
+    M1_BARCLAYS_ACCOUNT_NAME: "SK Information Technologies Limited",
+    M1_BARCLAYS_ACCOUNT_NUMBER: "87654321",
+    M1_BARCLAYS_SORT_CODE: "11-22-33",
+    M1_BARCLAYS_BANK_ADDRESS: "1 Test Street, London",
+    M1_BARCLAYS_LEI: "549300TESTLEI00000000",
+    M1_EXCHANGE_RATE_DIRECTION: "USD_PER_USDT",
+    M1_EXCHANGE_RATE_DECIMALS: "4",
+    M1_CALLBACK_URL: "https://sender.example/api/m1/skit-callback",
+    M1_CALLBACK_HMAC_SECRET: "callback-secret-for-tests-at-least-32-bytes",
+    M1_CALLBACK_SIGNATURE_HEADER: "x-skit-signature",
+    M1_CALLBACK_EVENT_ID_HEADER: "x-skit-event-id",
+    M1_CALLBACK_SIGNATURE_ENCODING: "hex",
+    M1_CALLBACK_STATUS_MAP: JSON.stringify({ ACCEPTED: "ACCEPTED" }),
+    M1_TREASURY_WALLET: treasuryWallet
+  };
+  const handler = createHandler({ env, poolProvider: () => pool });
+  const res = responseRecorder();
+  await handler({
+    method: "POST",
+    headers: { authorization: `Bearer ${adminToken}` },
+    body: { action: "prepare", orderId: order.order_id, beneficiary: "BARCLAYS" }
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.instruction.submissionStatus, "BLOCKED_MISSING_REQUIRED_FIELDS");
+  assert.ok(res.body.instruction.missingRequiredFields.includes(
+    "m1_exchange_rate_precision_must_preserve_locked_settlement_amount"
+  ));
 });
