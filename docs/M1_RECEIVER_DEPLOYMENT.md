@@ -33,9 +33,8 @@ Never commit API tokens, JWTs, HMAC secrets, or TLS private keys.
 ## Network and safety rules
 
 This integration is configured for USDT on TRON Mainnet TRC20 only.
-Ethereum ERC-20 wallet addresses and network identifiers are rejected. The
-TRON destination wallet is supplied through `M1_TREASURY_WALLET`; no
-production wallet address is hard-coded or guessed.
+The destination wallet is supplied only through `M1_TREASURY_WALLET`;
+no wallet address is hard-coded or guessed.
 
 ## Current deployment status
 
