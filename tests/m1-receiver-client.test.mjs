@@ -23,7 +23,7 @@ const instruction = {
   currency: "USD",
   settlement_currency: "USDT",
   exchange_rate: "1.00",
-  settlement_amount: "10.00",
+  settlement_amount: "10.000000",
   debtor_name: "Test Debtor",
   debtor_account: "test-debtor-account",
   creditor_name: "Test Creditor",
@@ -123,6 +123,22 @@ test("rejects wrong JWT subject, server, or token purpose before settlement POST
     await assert.rejects(client.submitSettlement({ instruction, idempotencyKey: "test-idempotency-0001" }));
     assert.equal(settlementCalled, false);
   }
+});
+
+test("rejects non-fixed-scale settlement decimals before making any network request", async () => {
+  let called = false;
+  const client = createM1ReceiverClient({
+    ...config,
+    transport: async () => { called = true; return { statusCode: 202, body: "{}" }; }
+  });
+  await assert.rejects(
+    client.submitSettlement({
+      instruction: { ...instruction, settlement_amount: "10.00" },
+      idempotencyKey: "test-invalid-scale-0001"
+    }),
+    /settlement_amount has an invalid decimal representation/
+  );
+  assert.equal(called, false);
 });
 
 test("rejects missing idempotency before making any network request", async () => {
