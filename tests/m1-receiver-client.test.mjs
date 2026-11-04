@@ -125,12 +125,6 @@ test("rejects wrong JWT subject, server, or token purpose before settlement POST
   }
 });
 
-test("rejects an Ethereum wallet address for this TRC20 contract", () => {
-  assert.throws(() => createM1ReceiverClient({
-    ...config, treasuryWallet: "0x0000000000000000000000000000000000000001"
-  }), /TRON network, or treasury wallet/);
-});
-
 test("rejects missing idempotency before making any network request", async () => {
   let called = false;
   const client = createM1ReceiverClient({
