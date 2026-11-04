@@ -100,3 +100,13 @@ test("keeps callback endpoint disabled until the full SKIT contract is configure
   await createSkitCallbackHandler({ env: {} })({ method: "POST", headers: {} }, res);
   assert.equal(res.statusCode, 503);
 });
+
+test("rejects configuration that maps a non-final ACCEPTED event to SETTLED", async () => {
+  const unsafeEnv = {
+    ...env,
+    M1_CALLBACK_STATUS_MAP: JSON.stringify({ ACCEPTED: "SETTLED" })
+  };
+  const res = responseRecorder();
+  await createSkitCallbackHandler({ env: unsafeEnv })({ method: "POST", headers: {} }, res);
+  assert.equal(res.statusCode, 503);
+});
