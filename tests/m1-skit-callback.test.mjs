@@ -130,3 +130,21 @@ test("rejects a reused event ID whose signed payload has changed", async () => {
   assert.match(res.body.error, /conflicts with a different event/);
   assert.ok(pool.calls.some(call => call.sql.includes("SELECT external_event_id, instruction_id, payload_hash")));
 });
+
+
+test("reads the original callback bytes from an unparsed request stream", async () => {
+  const body = Buffer.from(JSON.stringify({
+    transaction_id: "M1-transaction-0001",
+    status: "ACCEPTED"
+  }));
+  const signature = createHmac("sha256", secret).update(body).digest("hex");
+  const req = {
+    method: "POST",
+    headers: { "x-skit-signature": signature, "x-skit-event-id": "event-stream-01" },
+    async *[Symbol.asyncIterator]() { yield body; }
+  };
+  const res = responseRecorder();
+  await createSkitCallbackHandler({ env, poolProvider: () => fakePool() })(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.settlement_status, "ACCEPTED");
+});
