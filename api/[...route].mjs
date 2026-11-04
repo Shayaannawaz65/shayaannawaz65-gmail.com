@@ -9,7 +9,6 @@ import s2sTerminalAccess from "../lib/routes/console/s2s-terminal-access.mjs";
 import s2sTerminalAudit from "../lib/routes/console/s2s-terminal-audit.mjs";
 import terminalAdmin from "../lib/routes/console/terminal-admin.mjs";
 import m1SettlementAdmin from "../lib/routes/console/m1-settlement-admin.mjs";
-import m1SkitCallback from "../lib/routes/console/m1-skit-callback.mjs";
 import consoleStatus from "../lib/routes/console/status.mjs";
 import transactions from "../lib/routes/console/transactions.mjs";
 import tronDbHealth from "../lib/routes/tron/db-health.mjs";
@@ -33,7 +32,6 @@ const routes = new Map([
   ["console/s2s-terminal-audit", s2sTerminalAudit],
   ["console/terminal-admin", terminalAdmin],
   ["console/m1-settlement-admin", m1SettlementAdmin],
-  ["m1/skit-callback", m1SkitCallback],
   ["console/status", consoleStatus],
   ["console/transactions", transactions],
   ["tron/db-health", tronDbHealth],
