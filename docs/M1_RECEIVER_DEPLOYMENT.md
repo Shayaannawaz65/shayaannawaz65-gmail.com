@@ -27,6 +27,12 @@ build variables or commit their values.
 | `M1_DEBTOR_NAME` | Legal account-holder name of the actual sending bank account; never populate from a TRON wallet or beneficiary record. |
 | `M1_DEBTOR_ACCOUNT` | Actual sending bank account identifier, server-side only. |
 | `M1_DEBTOR_VERIFICATION_REF` | Internal reference to the verified sender bank record / mandate supporting the debtor fields. |
+| `M1_BARCLAYS_ACCOUNT_NAME` | Verified beneficiary account-holder name, server-side only. |
+| `M1_BARCLAYS_ACCOUNT_NUMBER` | Barclays local account number, server-side only. |
+| `M1_BARCLAYS_SORT_CODE` | Barclays local sort code, server-side only. |
+| `M1_BARCLAYS_BANK_ADDRESS` | Verified Barclays beneficiary bank address. |
+| `M1_BARCLAYS_LEI` | Verified beneficiary legal entity identifier. |
+| `M1_WISE_ACCOUNT_NAME`, `M1_WISE_ACCOUNT_NUMBER`, `M1_WISE_IBAN`, `M1_WISE_BIC_SWIFT` | Optional Wise beneficiary metadata, server-side only. |
 | `M1_EXCHANGE_RATE_DIRECTION` | Must be explicitly confirmed as `USD_PER_USDT` before dispatch. |
 | `M1_EXCHANGE_RATE_DECIMALS` | SKIT-confirmed rate precision, integer 0–12. |
 | `M1_CALLBACK_HMAC_SECRET` | Separate callback HMAC-SHA256 secret, at least 32 bytes; provision only after SKIT confirms the callback signing contract. |
@@ -39,7 +45,7 @@ build variables or commit their values.
 | `T2T_S2S_AUTHORIZATION_ADMIN_ID` | Existing audit actor ID for the authorized operator. |
 
 Do not use `VITE_` or other client-exposed variable prefixes for any of these.
-Never commit API tokens, JWTs, HMAC secrets, or TLS private keys.
+Never commit API tokens, JWTs, HMAC secrets, TLS private keys, bank account numbers, sort codes, IBANs, BIC/SWIFT identifiers, or beneficiary verification data. Beneficiary details are loaded only from server-side environment variables.
 
 ## Network and safety rules
 
