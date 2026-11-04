@@ -96,12 +96,6 @@ test("prepares M1 payload from locked quote and verified Barclays beneficiary wi
     M1_BARCLAYS_LEI: "549300TESTLEI00000000",
     M1_EXCHANGE_RATE_DIRECTION: "USD_PER_USDT",
     M1_EXCHANGE_RATE_DECIMALS: "4",
-    M1_CALLBACK_URL: "https://sender.example/api/m1/skit-callback",
-    M1_CALLBACK_HMAC_SECRET: "callback-secret-for-tests-at-least-32-bytes",
-    M1_CALLBACK_SIGNATURE_HEADER: "x-skit-signature",
-    M1_CALLBACK_EVENT_ID_HEADER: "x-skit-event-id",
-    M1_CALLBACK_SIGNATURE_ENCODING: "hex",
-    M1_CALLBACK_STATUS_MAP: JSON.stringify({ ACCEPTED: "ACCEPTED", FINAL_SETTLED: "SETTLED" }),
     M1_TREASURY_WALLET: treasuryWallet
   };
   const handler = createHandler({ env, poolProvider: () => pool });
@@ -144,12 +138,6 @@ test("keeps M1 instruction blocked when verified debtor bank source is absent", 
     M1_BARCLAYS_LEI: "549300TESTLEI00000000",
     M1_EXCHANGE_RATE_DIRECTION: "USD_PER_USDT",
     M1_EXCHANGE_RATE_DECIMALS: "4",
-    M1_CALLBACK_URL: "https://sender.example/api/m1/skit-callback",
-    M1_CALLBACK_HMAC_SECRET: "callback-secret-for-tests-at-least-32-bytes",
-    M1_CALLBACK_SIGNATURE_HEADER: "x-skit-signature",
-    M1_CALLBACK_EVENT_ID_HEADER: "x-skit-event-id",
-    M1_CALLBACK_SIGNATURE_ENCODING: "hex",
-    M1_CALLBACK_STATUS_MAP: JSON.stringify({ ACCEPTED: "ACCEPTED" }),
     M1_TREASURY_WALLET: treasuryWallet
   };
   const handler = createHandler({ env, poolProvider: () => pool });
@@ -194,12 +182,6 @@ test("blocks a rounded M1 rate that would change the locked USDT amount", async 
     M1_BARCLAYS_LEI: "549300TESTLEI00000000",
     M1_EXCHANGE_RATE_DIRECTION: "USD_PER_USDT",
     M1_EXCHANGE_RATE_DECIMALS: "4",
-    M1_CALLBACK_URL: "https://sender.example/api/m1/skit-callback",
-    M1_CALLBACK_HMAC_SECRET: "callback-secret-for-tests-at-least-32-bytes",
-    M1_CALLBACK_SIGNATURE_HEADER: "x-skit-signature",
-    M1_CALLBACK_EVENT_ID_HEADER: "x-skit-event-id",
-    M1_CALLBACK_SIGNATURE_ENCODING: "hex",
-    M1_CALLBACK_STATUS_MAP: JSON.stringify({ ACCEPTED: "ACCEPTED" }),
     M1_TREASURY_WALLET: treasuryWallet
   };
   const handler = createHandler({ env, poolProvider: () => pool });
@@ -215,4 +197,26 @@ test("blocks a rounded M1 rate that would change the locked USDT amount", async 
   assert.ok(res.body.instruction.missingRequiredFields.includes(
     "m1_exchange_rate_precision_must_preserve_locked_settlement_amount"
   ));
+});
+
+
+test("hard-blocks every production M1 outbound submission before database or network access", async () => {
+  const handler = createHandler({
+    env: {
+      NODE_ENV: "production",
+      T2T_S2S_AUTHORIZATION_ADMIN_TOKEN: adminToken,
+      T2T_S2S_AUTHORIZATION_ADMIN_ID: "test-operator"
+    },
+    poolProvider: () => { throw new Error("database must not be accessed"); },
+    loadLocalEnvironment: () => { throw new Error("local env must not be loaded"); },
+    createReceiver: () => { throw new Error("receiver must not be created"); }
+  });
+  const res = responseRecorder();
+  await handler({
+    method: "POST",
+    headers: { authorization: `Bearer ${adminToken}` },
+    body: { action: "dispatch", instructionId: "00000000-0000-4000-8000-000000000022" }
+  }, res);
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.error, /production instruction submission is disabled/);
 });
