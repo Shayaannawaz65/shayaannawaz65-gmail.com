@@ -162,3 +162,19 @@ test("does not treat non-202 responses as accepted", async () => {
     error => error.code === "M1_UNEXPECTED_STATUS"
   );
 });
+
+
+test("does not send optional HMAC header when SKIT signing secret is not configured", async () => {
+  let captured;
+  const client = createM1ReceiverClient({
+    ...config,
+    requestSignatureSecret: "",
+    transport: transportFor({ statusCode: 202, body: "{}" }, request => { captured = request; })
+  });
+  const result = await client.submitSettlement({
+    instruction, idempotencyKey: "test-optional-signature-0001"
+  });
+  assert.equal(captured.headers["X-Request-Signature"], undefined);
+  assert.equal(result.status, "ACCEPTED");
+  assert.equal(result.settled, false);
+});
