@@ -28,7 +28,7 @@ function responseRecorder() {
   };
 }
 
-function fakePool({ duplicate = false } = {}) {
+function fakePool({ duplicate = false, conflict = false } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
@@ -38,7 +38,19 @@ function fakePool({ duplicate = false } = {}) {
         return { rowCount: 1, rows: [{ instruction_id: "00000000-0000-4000-8000-000000000001", settlement_status: "NOT_REPORTED" }] };
       }
       if (String(sql).includes("INSERT INTO public.t2t_m1_settlement_callback_events")) {
-        return duplicate ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ callback_event_id: "00000000-0000-4000-8000-000000000002" }] };
+        return duplicate || conflict
+          ? { rowCount: 0, rows: [] }
+          : { rowCount: 1, rows: [{ callback_event_id: "00000000-0000-4000-8000-000000000002" }] };
+      }
+      if (String(sql).includes("SELECT external_event_id, instruction_id, payload_hash")) {
+        return {
+          rowCount: 1,
+          rows: [{
+            external_event_id: params[0],
+            instruction_id: "00000000-0000-4000-8000-000000000001",
+            payload_hash: conflict ? "b".repeat(64) : params[1]
+          }]
+        };
       }
       return { rowCount: 1, rows: [] };
     },
@@ -47,7 +59,7 @@ function fakePool({ duplicate = false } = {}) {
   return { calls, connect: async () => client };
 }
 
-async function invoke({ status = "ACCEPTED", duplicate = false, eventId = "event-0001" } = {}) {
+async function invoke({ status = "ACCEPTED", duplicate = false, conflict = false, eventId = "event-0001" } = {}) {
   const body = Buffer.from(JSON.stringify({
     transaction_id: "M1-transaction-0001",
     status,
@@ -60,7 +72,7 @@ async function invoke({ status = "ACCEPTED", duplicate = false, eventId = "event
     headers: { "x-skit-signature": signature, "x-skit-event-id": eventId }
   };
   const res = responseRecorder();
-  const pool = fakePool({ duplicate });
+  const pool = fakePool({ duplicate, conflict });
   let error = null;
   await createSkitCallbackHandler({ env, poolProvider: () => pool, onError: value => { error = value?.message || String(value); } })(req, res);
   return { res, pool, error };
@@ -109,4 +121,12 @@ test("rejects configuration that maps a non-final ACCEPTED event to SETTLED", as
   const res = responseRecorder();
   await createSkitCallbackHandler({ env: unsafeEnv })({ method: "POST", headers: {} }, res);
   assert.equal(res.statusCode, 503);
+});
+
+
+test("rejects a reused event ID whose signed payload has changed", async () => {
+  const { res, pool, error } = await invoke({ status: "FINAL_SETTLED", conflict: true });
+  assert.equal(res.statusCode, 409, error || "callback conflict was not rejected");
+  assert.match(res.body.error, /conflicts with a different event/);
+  assert.ok(pool.calls.some(call => call.sql.includes("SELECT external_event_id, instruction_id, payload_hash")));
 });
