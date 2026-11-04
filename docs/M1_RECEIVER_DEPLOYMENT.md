@@ -59,11 +59,13 @@ legacy T2T deployment and is not confirmed as the correct CM Sender project.
 ## Database
 
 Apply `migrations/023_m1_settlement_outbox.sql` only after the existing payment
-order and TRON deposit migrations. The outbox stores exact USD cents/decimal
-text, one beneficiary selection, source transaction/event, idempotency key,
-payload hash, status, attempt metadata, HTTP status, and an allowlisted
-sanitized response. There is no `SETTLED` status: M1 HTTP 202 is recorded as
-`ACCEPTED` only.
+order and TRON deposit migrations. The outbox stores exact USD cents/decimal text, one beneficiary selection,
+source transaction/event, debtor verification reference, idempotency key,
+payload hash, submission attempt metadata, HTTP status, and an allowlisted
+sanitized response. Apply `migrations/025_m1_callback_processing.sql` after
+migration 023. The `submission_status` records HTTP delivery (so HTTP 202 is
+`ACCEPTED` only); the separate `settlement_status` is changed only by an
+authenticated callback whose exact external status is explicitly mapped.
 
 ## Current deliberate dispatch blockers
 
