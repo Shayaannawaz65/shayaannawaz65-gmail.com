@@ -292,7 +292,7 @@ test("valid signed order inserts a pending order using mock database", async () 
   assert.equal(res.body.payAddress, "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8");
   assert.equal(res.body.payAmount, "12.501250");
   assert.equal(res.body.paymentNetwork, "TRON-TRC20");
-  assert.match(res.body.paymentStatusUrl, /api\\/console\\/payment-status\\?token=/);
+  assert.match(res.body.paymentStatusUrl, /api\/console\/payment-status\\?token=/);
   assert.equal(pool.state.inserted, true);
   assert.equal(pool.state.committed, true);
 
