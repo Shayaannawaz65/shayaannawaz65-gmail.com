@@ -88,7 +88,8 @@ real customer deposits, payment orders, beneficiary details, or real capital.
 ## Database migrations
 
 Migration 023 creates the instruction-registration outbox. Migration 025 was
-introduced during the earlier callback design. Migration 026 removes the
-callback event table and callback-only settlement columns. Preserve migration
+introduced during the earlier callback design. Migration 026 removes only the
+callback event table. Settlement status columns remain preserved for a future,
+separately contracted payout/reconciliation process. Preserve migration
 history and apply migration 026 through the normal controlled migration
 process in every environment where migration 025 was applied.
