@@ -256,19 +256,25 @@ test("valid signed order inserts a pending order using mock database", async () 
     now: () => now,
     randomBytes: size => Buffer.alloc(size, 7),
     sdkProvider: () => ({
-      async createCheckout(input) {
-        assert.equal(input.amount, 12.5);
-        assert.equal(input.currency, "usd");
-        assert.equal(input.payCurrency, "usdttrc20");
-        assert.equal(input.orderId, "00000000-0000-4000-8000-000000000001");
-        return {
-          id: "np-invoice-test-001",
-          invoice_url: "https://nowpayments.io/payment/?iid=np-invoice-test-001",
-          order_id: "00000000-0000-4000-8000-000000000001",
-          price_currency: "usd",
-          pay_currency: "usdttrc20",
-          price_amount: 12.5
-        };
+      raw: {
+        async createPayment(input) {
+          assert.equal(input.price_amount, 12.5);
+          assert.equal(input.price_currency, "usd");
+          assert.equal(input.pay_amount, "12.501250");
+          assert.equal(input.pay_currency, "usdttrc20");
+          assert.equal(input.order_id, "00000000-0000-4000-8000-000000000001");
+          assert.equal(input.ipn_callback_url, env.NOWPAYMENTS_IPN_CALLBACK_URL);
+          return {
+            payment_id: "np-payment-test-001",
+            payment_status: "waiting",
+            order_id: "00000000-0000-4000-8000-000000000001",
+            price_currency: "usd",
+            pay_currency: "usdttrc20",
+            price_amount: 12.5,
+            pay_amount: 12.50125,
+            pay_address: "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8"
+          };
+        }
       }
     })
   })({ method: "POST", headers: signedHeaders(body), body }, res);
@@ -281,8 +287,12 @@ test("valid signed order inserts a pending order using mock database", async () 
   assert.equal(res.body.amountUsdCents, "1250");
   assert.equal(res.body.amountUsdtRaw, "12501250");
   assert.equal(res.body.provider, "NOWPAYMENTS");
-  assert.equal(res.body.providerInvoiceId, "np-invoice-test-001");
-  assert.equal(res.body.paymentUrl, "https://nowpayments.io/payment/?iid=np-invoice-test-001");
+  assert.equal(res.body.providerPaymentId, "np-payment-test-001");
+  assert.equal(res.body.payCurrency, "usdttrc20");
+  assert.equal(res.body.payAddress, "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8");
+  assert.equal(res.body.payAmount, "12.501250");
+  assert.equal(res.body.paymentNetwork, "TRON-TRC20");
+  assert.match(res.body.paymentStatusUrl, /api\/console\/payment-status\?token=/);
   assert.equal(pool.state.inserted, true);
   assert.equal(pool.state.committed, true);
 

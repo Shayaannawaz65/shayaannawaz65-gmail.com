@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createM1ReceiverClient } from "../lib/cm/m1-receiver-client.mjs";
+import { M1_RECEIVER_CONTRACT } from "../lib/cm/m1-contract.mjs";
 
 const certificatePem = readFileSync("config/certs/m1-receiver.pem", "utf8");
 const tronWallet = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb";
@@ -14,6 +15,33 @@ const config = {
   endpoint: "https://140.245.233.184/api/v1/settlement/receive",
   certificatePem
 };
+function makeReceiverJwt() {
+  const payload = Buffer.from(JSON.stringify({
+    exp: Math.floor(Date.now() / 1000) + 3600
+  })).toString("base64url");
+  return `test.${payload}.signature`;
+}
+
+function receiverTransport({ settlementStatus = 202, settlementBody = "{}" } = {}) {
+  const accessToken = makeReceiverJwt();
+  let settlementRequest;
+  const transport = async request => {
+    if (request.url === M1_RECEIVER_CONTRACT.authEndpoint) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          access_token: accessToken,
+          server_id: config.serverId,
+          endpoint: config.endpoint
+        })
+      };
+    }
+    settlementRequest = request;
+    return { statusCode: settlementStatus, body: settlementBody };
+  };
+  return { transport, getSettlementRequest: () => settlementRequest, accessToken };
+}
+
 const instruction = {
   transaction_id: "test-transaction-0001",
   amount: "10.00",
@@ -36,58 +64,52 @@ const instruction = {
 };
 
 test("constructs authenticated TRC20 M1 request and treats 202 as accepted only", async () => {
-  let captured;
+  const mock = receiverTransport({ settlementBody: '{"status":"accepted"}' });
   const client = createM1ReceiverClient({
     ...config,
-    transport: async request => {
-      captured = request;
-      return { statusCode: 202, body: '{"status":"accepted"}' };
-    }
+    transport: mock.transport
   });
   const result = await client.submitSettlement({
     instruction, idempotencyKey: "test-idempotency-0001", requestId: "test-request-0001"
   });
+  const captured = mock.getSettlementRequest();
   assert.equal(captured.headers["X-API-TOKEN"], config.apiToken);
-  assert.equal(captured.headers.Authorization, `Bearer ${config.jwtToken}`);
+  assert.equal(captured.headers.Authorization, `Bearer ${mock.accessToken}`);
   assert.equal(captured.headers["X-Idempotency-Key"], "test-idempotency-0001");
   const sent = JSON.parse(captured.body);
   assert.equal(sent.receiver.server_id, config.serverId);
   assert.equal(sent.receiver.tls_verify, true);
-  assert.equal(sent.receiver.jwt_token, undefined);
+  assert.equal(sent.receiver.jwt_token, mock.accessToken);
   assert.equal(sent.tokenization_details.network, "TRON Mainnet TRC20");
   assert.equal(result.status, "ACCEPTED");
   assert.equal(result.settled, false);
 });
 
 test("adds optional HMAC-SHA256 signature over exact serialized request body", async () => {
-  let captured;
+  const mock = receiverTransport();
   const secret = "unit-test-hmac-secret-with-32-bytes-min";
   const client = createM1ReceiverClient({
     ...config, requestSignatureSecret: secret,
-    transport: async request => {
-      captured = request;
-      return { statusCode: 202, body: "{}" };
-    }
+    transport: mock.transport
   });
   await client.submitSettlement({ instruction, idempotencyKey: "test-hmac-key-0001" });
   const { createHmac } = await import("node:crypto");
+  const captured = mock.getSettlementRequest();
   const expected = createHmac("sha256", secret).update(captured.body).digest("base64url");
   assert.equal(captured.headers["X-Request-Signature"], expected);
 });
 
 test("adds optional HMAC-SHA256 signature over the exact serialized request body", async () => {
-  let captured;
+  const mock = receiverTransport();
   const secret = "unit-test-hmac-secret-with-32-bytes-min";
   const client = createM1ReceiverClient({
     ...config,
     requestSignatureSecret: secret,
-    transport: async request => {
-      captured = request;
-      return { statusCode: 202, body: "{}" };
-    }
+    transport: mock.transport
   });
   await client.submitSettlement({ instruction, idempotencyKey: "test-hmac-key-0001" });
   const { createHmac } = await import("node:crypto");
+  const captured = mock.getSettlementRequest();
   const expected = createHmac("sha256", secret).update(captured.body).digest("base64url");
   assert.equal(captured.headers["X-Request-Signature"], expected);
 });
@@ -121,7 +143,7 @@ test("rejects an Ethereum wallet address for TRC20 settlement", () => {
 test("rejects an endpoint outside the approved M1 receiver", () => {
   assert.throws(() => createM1ReceiverClient({
     ...config, endpoint: "https://example.com/api/v1/settlement/receive"
-  }), /approved receiver endpoint/);
+  }), /approved receiver contract/);
 });
 
 test("rejects a malformed certificate before creating the client", () => {
@@ -131,8 +153,9 @@ test("rejects a malformed certificate before creating the client", () => {
 });
 
 test("maps M1 409 to an explicit idempotency conflict", async () => {
+  const mock = receiverTransport({ settlementStatus: 409, settlementBody: '{"error":"duplicate"}' });
   const client = createM1ReceiverClient({
-    ...config, transport: async () => ({ statusCode: 409, body: '{"error":"duplicate"}' })
+    ...config, transport: mock.transport
   });
   await assert.rejects(
     client.submitSettlement({ instruction, idempotencyKey: "test-idempotency-0002" }),
@@ -141,8 +164,9 @@ test("maps M1 409 to an explicit idempotency conflict", async () => {
 });
 
 test("does not treat non-202 responses as accepted", async () => {
+  const mock = receiverTransport({ settlementStatus: 200, settlementBody: "{}" });
   const client = createM1ReceiverClient({
-    ...config, transport: async () => ({ statusCode: 200, body: "{}" })
+    ...config, transport: mock.transport
   });
   await assert.rejects(
     client.submitSettlement({ instruction, idempotencyKey: "test-idempotency-0003" }),
